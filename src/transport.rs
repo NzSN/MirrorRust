@@ -14,8 +14,12 @@ pub fn spawn_mirror(bin_path: &str) -> Result<Transport, Error> {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()?;
-    let stdin = child.stdin.take().expect("piped stdin");
-    let stdout = child.stdout.take().expect("piped stdout");
+    let stdin = child.stdin.take().ok_or_else(|| {
+        Error::Io(std::io::Error::other("failed to capture child stdin"))
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        Error::Io(std::io::Error::other("failed to capture child stdout"))
+    })?;
     let lines = BufReader::new(stdout).lines();
     Ok(Transport { child, stdin: Some(stdin), lines })
 }
