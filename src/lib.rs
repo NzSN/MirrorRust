@@ -1,3 +1,3 @@
 pub mod protocol;
 
-pub use protocol::{State, Value};
+pub use protocol::{encode_state, State, Value};
