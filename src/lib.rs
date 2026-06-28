@@ -10,6 +10,8 @@ pub use protocol::{
     TraceGenerationConfig, Value,
 };
 
+pub use transport::{spawn_mirror, Transport};
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("spec invalid: {0}")]
