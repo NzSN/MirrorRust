@@ -1,5 +1,6 @@
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::{json, Value as Json};
 use std::collections::BTreeMap;
 
@@ -110,4 +111,130 @@ pub(crate) fn prettify_state(state: &State) -> Json {
 
 pub(crate) fn prettify_json(state: &State) -> String {
     serde_json::to_string(&prettify_state(state)).unwrap_or_default()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApalacheConfig {
+    pub spec_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub init_predicate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_predicate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub const_init: Option<String>,
+    pub invariant: String,
+    pub length_bound: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub param_vars: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceGenerationConfig {
+    pub num_traces: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "proto_step", rename_all = "snake_case")]
+pub enum ClientMessage {
+    Register {
+        #[serde(rename = "apalacheConfig")]
+        apalache_config: ApalacheConfig,
+        #[serde(rename = "traceConfig")]
+        trace_config: TraceGenerationConfig,
+    },
+    RegisterTraces {
+        #[serde(rename = "apalacheConfig")]
+        apalache_config: ApalacheConfig,
+        #[serde(rename = "itfTracePaths")]
+        itf_trace_paths: Vec<String>,
+    },
+    RegisterTraceGen {
+        #[serde(rename = "apalacheConfig")]
+        apalache_config: ApalacheConfig,
+        #[serde(rename = "traceConfig")]
+        trace_config: TraceGenerationConfig,
+        #[serde(rename = "destPath")]
+        dest_path: String,
+    },
+    ReportState {
+        state: State,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecResult {
+    Valid,
+    Invalid(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirrorMessage {
+    SpecValidated { result: SpecResult },
+    InitialState { action: String, state: State },
+    NextStep { action: String, parameters: State },
+    StepOk,
+    StepMismatch { action: Option<String>, expected: State, actual: State },
+    AllStepsDone,
+    GenTracesDone { itf_trace_paths: Vec<String> },
+    ProtocolError { error: String },
+    RegisterError { error: String },
+}
+
+/// Serialize a Value in the *tagged* form. Used only by encode_client_message
+/// for the ReportState variant; matches the TS JSON.stringify of the tagged
+/// Value with the bigint replacer.
+impl Serialize for Value {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Value::Int(n) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "int")?;
+                m.serialize_entry("val", &json!({ "#bigint": n.to_string() }))?;
+                m.end()
+            }
+            Value::Bool(b) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "bool")?;
+                m.serialize_entry("val", b)?;
+                m.end()
+            }
+            Value::Str(v) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "str")?;
+                m.serialize_entry("val", v)?;
+                m.end()
+            }
+            Value::Set(items) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "set")?;
+                m.serialize_entry("val", items)?;
+                m.end()
+            }
+            Value::Tuple(items) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "tuple")?;
+                m.serialize_entry("val", items)?;
+                m.end()
+            }
+            Value::Record(rec) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "record")?;
+                m.serialize_entry("val", rec)?;
+                m.end()
+            }
+            Value::Null => {
+                let mut m = s.serialize_map(Some(1))?;
+                m.serialize_entry("tag", "null")?;
+                m.end()
+            }
+        }
+    }
+}
+
+pub fn encode_client_message(msg: &ClientMessage) -> String {
+    serde_json::to_string(msg).expect("ClientMessage serialization cannot fail")
 }

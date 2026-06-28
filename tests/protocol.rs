@@ -71,3 +71,62 @@ fn helper_get_param_and_int() {
     assert_eq!(get_param_int(&params, "missing", "foo"), 0);
     assert_eq!(get_param_int(&params, "x", "bar"), 0);
 }
+
+use mirrorrust::{
+    encode_client_message, ApalacheConfig, ClientMessage, TraceGenerationConfig,
+};
+
+fn cfg() -> ApalacheConfig {
+    ApalacheConfig {
+        spec_path: "/foo/bar.tla".into(),
+        init_predicate: None,
+        next_predicate: None,
+        const_init: None,
+        invariant: "TraceComplete".into(),
+        length_bound: 5,
+        param_vars: None,
+    }
+}
+
+#[test]
+fn encode_register() {
+    let msg = ClientMessage::Register {
+        apalache_config: cfg(),
+        trace_config: TraceGenerationConfig { num_traces: 10, view: None },
+    };
+    let v: serde_json::Value = serde_json::from_str(&encode_client_message(&msg)).unwrap();
+    assert_eq!(v["proto_step"], json!("register"));
+    assert_eq!(v["apalacheConfig"]["specPath"], json!("/foo/bar.tla"));
+    assert_eq!(v["apalacheConfig"]["invariant"], json!("TraceComplete"));
+    assert_eq!(v["apalacheConfig"]["lengthBound"], json!(5));
+    assert_eq!(v["traceConfig"]["numTraces"], json!(10));
+    assert!(v["apalacheConfig"].get("initPredicate").is_none());
+    assert!(v["apalacheConfig"].get("constInit").is_none());
+    assert!(v["traceConfig"].get("view").is_none());
+}
+
+#[test]
+fn encode_register_traces() {
+    let msg = ClientMessage::RegisterTraces {
+        apalache_config: cfg(),
+        itf_trace_paths: vec!["/tmp/trace1.itf.json".into(), "/tmp/trace2.itf.json".into()],
+    };
+    let v: serde_json::Value = serde_json::from_str(&encode_client_message(&msg)).unwrap();
+    assert_eq!(v["proto_step"], json!("register_traces"));
+    assert_eq!(v["itfTracePaths"], json!(["/tmp/trace1.itf.json", "/tmp/trace2.itf.json"]));
+}
+
+#[test]
+fn encode_report_state_is_tagged_with_bigint() {
+    let s = st(vec![
+        ("count", Value::Int(BigInt::parse_bytes(b"9007199254740991", 10).unwrap())),
+        ("flag", Value::Bool(true)),
+    ]);
+    let msg = ClientMessage::ReportState { state: s };
+    let v: serde_json::Value = serde_json::from_str(&encode_client_message(&msg)).unwrap();
+    assert_eq!(
+        v["state"]["count"],
+        json!({ "tag": "int", "val": { "#bigint": "9007199254740991" } })
+    );
+    assert_eq!(v["state"]["flag"], json!({ "tag": "bool", "val": true }));
+}
