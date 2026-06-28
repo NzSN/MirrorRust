@@ -1,4 +1,5 @@
 use mirrorrust::{as_int, as_record, as_str, encode_state, get_param, get_param_int, State, Value};
+use mirrorrust::{preset_client, StateComputer};
 use num_bigint::BigInt;
 use serde_json::json;
 
@@ -265,4 +266,22 @@ fn encode_state_decode_round_trip_bigint() {
         _ => panic!(),
     };
     assert_eq!(state["count"], Value::Int(BigInt::parse_bytes(b"12345678901234567890", 10).unwrap()));
+}
+
+#[test]
+fn preset_client_serves_in_order() {
+    let s0 = st(vec![("count", Value::Int(BigInt::from(0)))]);
+    let s1 = st(vec![("count", Value::Int(BigInt::from(2)))]);
+    let mut pc = preset_client(vec![s0.clone(), s1.clone()]);
+    let empty = State::new();
+    assert_eq!(pc.compute("init", &empty, &empty), s0);
+    assert_eq!(pc.compute("tick", &empty, &s0), s1);
+}
+
+#[test]
+#[should_panic(expected = "preset_client exhausted")]
+fn preset_client_panics_when_exhausted() {
+    let mut pc = preset_client(vec![]);
+    let empty = State::new();
+    let _ = pc.compute("init", &empty, &empty);
 }

@@ -10,6 +10,11 @@ pub use protocol::{
     TraceGenerationConfig, Value,
 };
 
+pub use client::{
+    preset_client, run_client, run_client_gen_traces, run_client_with_traces, PresetClient,
+    StateComputer,
+};
+
 pub use transport::{spawn_mirror, Transport};
 
 #[derive(Debug, thiserror::Error)]
