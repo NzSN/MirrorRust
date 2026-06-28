@@ -1,4 +1,4 @@
-use mirrorrust::{encode_state, State, Value};
+use mirrorrust::{as_int, as_record, as_str, encode_state, get_param, get_param_int, State, Value};
 use num_bigint::BigInt;
 use serde_json::json;
 
@@ -30,4 +30,44 @@ fn encode_state_set_tuple_record_null() {
     assert_eq!(e["pair"], json!({ "#tup": ["foo", { "#bigint": "7" }] }));
     assert_eq!(e["nothing"], serde_json::Value::Null);
     assert_eq!(e["person"], json!({ "name": "bob" }));
+}
+
+#[test]
+fn helper_as_int() {
+    assert_eq!(as_int(&Value::Int(BigInt::from(42))), Some(&BigInt::from(42)));
+    assert_eq!(as_int(&Value::Bool(true)), None);
+    assert_eq!(as_int(&Value::Str("hi".into())), None);
+    assert_eq!(as_int(&Value::Null), None);
+}
+
+#[test]
+fn helper_as_str() {
+    assert_eq!(as_str(&Value::Str("hello".into())), Some("hello"));
+    assert_eq!(as_str(&Value::Int(BigInt::from(1))), None);
+    assert_eq!(as_str(&Value::Bool(false)), None);
+}
+
+#[test]
+fn helper_as_record() {
+    let rec = st(vec![("a", Value::Int(BigInt::from(1)))]);
+    assert_eq!(as_record(&Value::Record(rec.clone())), Some(&rec));
+    assert_eq!(as_record(&Value::Int(BigInt::from(1))), None);
+    assert_eq!(as_record(&Value::Null), None);
+}
+
+#[test]
+fn helper_get_param_and_int() {
+    let params = st(vec![
+        ("x", Value::Record(st(vec![("foo", Value::Int(BigInt::from(42)))]))),
+        ("y", Value::Int(BigInt::from(7))),
+    ]);
+    assert_eq!(
+        get_param(&params, "x"),
+        Some(&st(vec![("foo", Value::Int(BigInt::from(42)))]))
+    );
+    assert_eq!(get_param(&params, "y"), None);
+    assert_eq!(get_param(&params, "missing"), None);
+    assert_eq!(get_param_int(&params, "x", "foo"), 42);
+    assert_eq!(get_param_int(&params, "missing", "foo"), 0);
+    assert_eq!(get_param_int(&params, "x", "bar"), 0);
 }
