@@ -130,3 +130,139 @@ fn encode_report_state_is_tagged_with_bigint() {
     );
     assert_eq!(v["state"]["flag"], json!({ "tag": "bool", "val": true }));
 }
+
+use mirrorrust::{decode_mirror_message, MirrorMessage, SpecResult};
+
+#[test]
+fn decode_spec_validated_valid() {
+    let m = decode_mirror_message(r#"{"proto_step":"spec_validated","result":"valid"}"#).unwrap();
+    assert_eq!(m, MirrorMessage::SpecValidated { result: SpecResult::Valid });
+}
+
+#[test]
+fn decode_spec_validated_invalid() {
+    let m = decode_mirror_message(r#"{"proto_step":"spec_validated","result":{"invalid":"bad spec"}}"#).unwrap();
+    assert_eq!(
+        m,
+        MirrorMessage::SpecValidated {
+            result: SpecResult::Invalid(r#"{"invalid":"bad spec"}"#.to_string())
+        }
+    );
+}
+
+#[test]
+fn decode_initial_state() {
+    let m = decode_mirror_message(r#"{"proto_step":"initial_state","action":"Init","state":{"count":0}}"#).unwrap();
+    assert_eq!(
+        m,
+        MirrorMessage::InitialState {
+            action: "Init".into(),
+            state: st(vec![("count", Value::Int(BigInt::from(0)))]),
+        }
+    );
+}
+
+#[test]
+fn decode_next_step() {
+    let m = decode_mirror_message(r#"{"proto_step":"next_step","action":"Incr","parameters":{"by":1}}"#).unwrap();
+    assert_eq!(
+        m,
+        MirrorMessage::NextStep {
+            action: "Incr".into(),
+            parameters: st(vec![("by", Value::Int(BigInt::from(1)))]),
+        }
+    );
+}
+
+#[test]
+fn decode_step_ok_and_all_done() {
+    assert_eq!(decode_mirror_message(r#"{"proto_step":"step_ok"}"#).unwrap(), MirrorMessage::StepOk);
+    assert_eq!(decode_mirror_message(r#"{"proto_step":"all_steps_done"}"#).unwrap(), MirrorMessage::AllStepsDone);
+}
+
+#[test]
+fn decode_step_mismatch() {
+    let m = decode_mirror_message(r#"{"proto_step":"step_mismatch","action":"Inc","expected":{"count":1},"actual":{"count":2}}"#).unwrap();
+    assert_eq!(
+        m,
+        MirrorMessage::StepMismatch {
+            action: Some("Inc".into()),
+            expected: st(vec![("count", Value::Int(BigInt::from(1)))]),
+            actual: st(vec![("count", Value::Int(BigInt::from(2)))]),
+        }
+    );
+}
+
+#[test]
+fn decode_gen_traces_done_and_errors() {
+    assert_eq!(
+        decode_mirror_message(r#"{"proto_step":"gen_traces_done","itfTracePaths":["/tmp/t1.itf.json"]}"#).unwrap(),
+        MirrorMessage::GenTracesDone { itf_trace_paths: vec!["/tmp/t1.itf.json".into()] }
+    );
+    assert_eq!(
+        decode_mirror_message(r#"{"proto_step":"protocol_error","error":"bad!"}"#).unwrap(),
+        MirrorMessage::ProtocolError { error: "bad!".into() }
+    );
+    assert_eq!(
+        decode_mirror_message(r#"{"proto_step":"register_error","error":"spec not found"}"#).unwrap(),
+        MirrorMessage::RegisterError { error: "spec not found".into() }
+    );
+}
+
+#[test]
+fn decode_unknown_proto_step() {
+    assert_eq!(
+        decode_mirror_message(r#"{"proto_step":"unknown_thing","x":1}"#).unwrap(),
+        MirrorMessage::ProtocolError { error: "unknown proto_step: unknown_thing".into() }
+    );
+}
+
+#[test]
+fn decode_value_kinds_via_initial_state() {
+    let m = decode_mirror_message(
+        r##"{"proto_step":"initial_state","action":"Init","state":{
+            "ready":true,"done":false,"name":"alice","nothing":null,
+            "person":{"name":"bob","age":30},
+            "pair":{"#tup":["foo",7]},
+            "items":[1,2,3]
+        }}"##,
+    )
+    .unwrap();
+    let state = match m {
+        MirrorMessage::InitialState { state, .. } => state,
+        _ => panic!("expected initial_state"),
+    };
+    assert_eq!(state["ready"], Value::Bool(true));
+    assert_eq!(state["done"], Value::Bool(false));
+    assert_eq!(state["name"], Value::Str("alice".into()));
+    assert_eq!(state["nothing"], Value::Null);
+    assert_eq!(
+        state["person"],
+        Value::Record(st(vec![("name", Value::Str("bob".into())), ("age", Value::Int(BigInt::from(30)))]))
+    );
+    assert_eq!(
+        state["pair"],
+        Value::Tuple(vec![Value::Str("foo".into()), Value::Int(BigInt::from(7))])
+    );
+    assert_eq!(
+        state["items"],
+        Value::Set(vec![Value::Int(BigInt::from(1)), Value::Int(BigInt::from(2)), Value::Int(BigInt::from(3))])
+    );
+}
+
+#[test]
+fn encode_state_decode_round_trip_bigint() {
+    let s = st(vec![("count", Value::Int(BigInt::parse_bytes(b"12345678901234567890", 10).unwrap()))]);
+    let line = serde_json::to_string(&json!({
+        "proto_step": "initial_state",
+        "action": "Init",
+        "state": encode_state(&s),
+    }))
+    .unwrap();
+    let m = decode_mirror_message(&line).unwrap();
+    let state = match m {
+        MirrorMessage::InitialState { state, .. } => state,
+        _ => panic!(),
+    };
+    assert_eq!(state["count"], Value::Int(BigInt::parse_bytes(b"12345678901234567890", 10).unwrap()));
+}

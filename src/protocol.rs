@@ -238,3 +238,100 @@ impl Serialize for Value {
 pub fn encode_client_message(msg: &ClientMessage) -> String {
     serde_json::to_string(msg).expect("ClientMessage serialization cannot fail")
 }
+
+/// Decode arbitrary ITF JSON into a Value (faithful to the TS `walk`).
+fn walk(v: &Json) -> Value {
+    match v {
+        Json::Null => Value::Null,
+        Json::Bool(b) => Value::Bool(*b),
+        Json::String(s) => Value::Str(s.clone()),
+        Json::Number(n) => Value::Int(number_to_bigint(n)),
+        Json::Array(items) => Value::Set(items.iter().map(walk).collect()),
+        Json::Object(obj) => {
+            if let Some(Json::String(s)) = obj.get("#bigint") {
+                return Value::Int(s.parse::<BigInt>().unwrap_or_else(|_| BigInt::from(0)));
+            }
+            if let Some(Json::Array(items)) = obj.get("#tup") {
+                return Value::Tuple(items.iter().map(walk).collect());
+            }
+            if let Some(Json::Array(items)) = obj.get("#set") {
+                return Value::Set(items.iter().map(walk).collect());
+            }
+            let mut rec = State::new();
+            for (k, iv) in obj {
+                rec.insert(k.clone(), walk(iv));
+            }
+            Value::Record(rec)
+        }
+    }
+}
+
+fn number_to_bigint(n: &serde_json::Number) -> BigInt {
+    if let Some(i) = n.as_i64() {
+        BigInt::from(i)
+    } else if let Some(u) = n.as_u64() {
+        BigInt::from(u)
+    } else {
+        n.to_string().parse::<BigInt>().unwrap_or_else(|_| BigInt::from(0))
+    }
+}
+
+/// Extract a State from a JSON object field via `walk`.
+fn walk_record(v: Option<&Json>) -> State {
+    match v.map(walk) {
+        Some(Value::Record(r)) => r,
+        _ => State::new(),
+    }
+}
+
+fn str_field(obj: &serde_json::Map<String, Json>, key: &str) -> String {
+    obj.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+}
+
+fn walk_message(obj: &serde_json::Map<String, Json>) -> MirrorMessage {
+    let step = obj.get("proto_step").and_then(|v| v.as_str()).unwrap_or("");
+    match step {
+        "spec_validated" => {
+            let result = match obj.get("result") {
+                Some(Json::String(s)) if s == "valid" => SpecResult::Valid,
+                Some(Json::String(s)) => SpecResult::Invalid(s.clone()),
+                Some(other) => SpecResult::Invalid(serde_json::to_string(other).unwrap_or_default()),
+                None => SpecResult::Invalid("null".to_string()),
+            };
+            MirrorMessage::SpecValidated { result }
+        }
+        "initial_state" => MirrorMessage::InitialState {
+            action: str_field(obj, "action"),
+            state: walk_record(obj.get("state")),
+        },
+        "next_step" => MirrorMessage::NextStep {
+            action: str_field(obj, "action"),
+            parameters: walk_record(obj.get("parameters")),
+        },
+        "step_ok" => MirrorMessage::StepOk,
+        "step_mismatch" => MirrorMessage::StepMismatch {
+            action: obj.get("action").and_then(|v| v.as_str()).map(String::from),
+            expected: walk_record(obj.get("expected")),
+            actual: walk_record(obj.get("actual")),
+        },
+        "all_steps_done" => MirrorMessage::AllStepsDone,
+        "gen_traces_done" => MirrorMessage::GenTracesDone {
+            itf_trace_paths: obj
+                .get("itfTracePaths")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        },
+        "protocol_error" => MirrorMessage::ProtocolError { error: str_field(obj, "error") },
+        "register_error" => MirrorMessage::RegisterError { error: str_field(obj, "error") },
+        other => MirrorMessage::ProtocolError { error: format!("unknown proto_step: {other}") },
+    }
+}
+
+pub fn decode_mirror_message(line: &str) -> Result<MirrorMessage, crate::Error> {
+    let raw: Json = serde_json::from_str(line)?;
+    match raw {
+        Json::Object(obj) => Ok(walk_message(&obj)),
+        _ => Ok(MirrorMessage::ProtocolError { error: "expected a JSON object".to_string() }),
+    }
+}
