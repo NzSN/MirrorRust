@@ -21,6 +21,7 @@ where
 }
 
 /// Serves a fixed sequence of states in order; panics when exhausted.
+#[derive(Debug)]
 pub struct PresetClient {
     states: Vec<State>,
     index: usize,
