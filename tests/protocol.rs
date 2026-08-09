@@ -247,8 +247,72 @@ fn decode_value_kinds_via_initial_state() {
     );
     assert_eq!(
         state["items"],
-        Value::Set(vec![Value::Int(BigInt::from(1)), Value::Int(BigInt::from(2)), Value::Int(BigInt::from(3))])
+        Value::Seq(vec![Value::Int(BigInt::from(1)), Value::Int(BigInt::from(2)), Value::Int(BigInt::from(3))])
     );
+}
+
+#[test]
+fn encode_state_seq_map_variant_unserializable() {
+    let s = st(vec![
+        ("list", Value::Seq(vec![Value::Int(BigInt::from(1))])),
+        ("m", Value::Map(vec![(Value::Str("k".into()), Value::Int(BigInt::from(2)))])),
+        ("v", Value::Variant("Some".into(), Box::new(Value::Int(BigInt::from(3))))),
+        ("u", Value::Unserializable("opaque".into())),
+    ]);
+    let e = encode_state(&s);
+    assert_eq!(e["list"], json!([{ "#bigint": "1" }]));
+    assert_eq!(e["m"], json!({ "#map": [["k", { "#bigint": "2" }]] }));
+    assert_eq!(e["v"], json!({ "tag": "Some", "value": { "#bigint": "3" } }));
+    assert_eq!(e["u"], json!({ "#unserializable": "opaque" }));
+}
+
+#[test]
+fn decode_value_seq_map_variant_unserializable() {
+    let m = decode_mirror_message(
+        r##"{"proto_step":"initial_state","action":"Init","state":{
+            "list":[1,2],
+            "m":{"#map":[["k",5]]},
+            "v":{"tag":"Some","value":7},
+            "u":{"#unserializable":"x"}
+        }}"##,
+    )
+    .unwrap();
+    let state = match m {
+        MirrorMessage::InitialState { state, .. } => state,
+        _ => panic!("expected initial_state"),
+    };
+    assert_eq!(state["list"], Value::Seq(vec![Value::Int(BigInt::from(1)), Value::Int(BigInt::from(2))]));
+    assert_eq!(
+        state["m"],
+        Value::Map(vec![(Value::Str("k".into()), Value::Int(BigInt::from(5)))])
+    );
+    assert_eq!(state["v"], Value::Variant("Some".into(), Box::new(Value::Int(BigInt::from(7)))));
+    assert_eq!(state["u"], Value::Unserializable("x".into()));
+}
+
+#[test]
+fn encode_report_state_tagged_new_variants() {
+    let s = st(vec![
+        ("list", Value::Seq(vec![Value::Int(BigInt::from(1))])),
+        ("m", Value::Map(vec![(Value::Str("k".into()), Value::Int(BigInt::from(2)))])),
+        ("v", Value::Variant("Some".into(), Box::new(Value::Int(BigInt::from(3))))),
+        ("u", Value::Unserializable("opaque".into())),
+    ]);
+    let msg = ClientMessage::ReportState { state: s };
+    let v: serde_json::Value = serde_json::from_str(&encode_client_message(&msg)).unwrap();
+    assert_eq!(
+        v["state"]["list"],
+        json!({ "tag": "seq", "val": [{ "tag": "int", "val": { "#bigint": "1" } }] })
+    );
+    assert_eq!(
+        v["state"]["m"],
+        json!({ "tag": "map", "val": [[{ "tag": "str", "val": "k" }, { "tag": "int", "val": { "#bigint": "2" } }]] })
+    );
+    assert_eq!(
+        v["state"]["v"],
+        json!({ "tag": "variant", "variantTag": "Some", "value": { "tag": "int", "val": { "#bigint": "3" } } })
+    );
+    assert_eq!(v["state"]["u"], json!({ "tag": "unserializable", "val": "opaque" }));
 }
 
 #[test]

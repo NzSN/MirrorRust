@@ -61,4 +61,4 @@ fn main() -> Result<(), mirrorrust::Error> {
 - Encoding: `encode_state`, `encode_client_message`, `decode_mirror_message`.
 - Transport: `spawn_mirror`, `Transport`.
 
-State values use the tagged `Value` enum (`Int(BigInt)`, `Bool`, `Str`, `Set`, `Tuple`, `Record`, `Null`), serialized to the Apalache ITF format (`{"#bigint":"42"}`, `{"#tup":[...]}`, `{"#set":[...]}`).
+State values use the tagged `Value` enum (`Int(BigInt)`, `Bool`, `Str`, `Set`, `Seq`, `Tuple`, `Map`, `Record`, `Variant`, `Unserializable`, `Null`), serialized to the Apalache ITF format (`{"#bigint":"42"}`, `{"#tup":[...]}`, `{"#set":[...]}`, `{"#map":[[k,v],...]}`, `{"tag":t,"value":v}`, `{"#unserializable":s}`; bare JSON arrays decode as `Seq`).

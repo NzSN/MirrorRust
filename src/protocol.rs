@@ -11,8 +11,12 @@ pub enum Value {
     Bool(bool),
     Str(String),
     Set(Vec<Value>),
+    Seq(Vec<Value>),
     Tuple(Vec<Value>),
+    Map(Vec<(Value, Value)>),
     Record(State),
+    Variant(String, Box<Value>),
+    Unserializable(String),
     Null,
 }
 
@@ -26,7 +30,15 @@ fn encode_value(v: &Value) -> Json {
         Value::Bool(b) => json!(b),
         Value::Str(s) => json!(s),
         Value::Set(items) => json!({ "#set": items.iter().map(encode_value).collect::<Vec<_>>() }),
+        Value::Seq(items) => Json::Array(items.iter().map(encode_value).collect()),
         Value::Tuple(items) => json!({ "#tup": items.iter().map(encode_value).collect::<Vec<_>>() }),
+        Value::Map(entries) => {
+            let pairs: Vec<Json> = entries
+                .iter()
+                .map(|(k, v)| Json::Array(vec![encode_value(k), encode_value(v)]))
+                .collect();
+            json!({ "#map": pairs })
+        }
         Value::Record(rec) => {
             let mut m = serde_json::Map::new();
             for (k, iv) in rec {
@@ -34,6 +46,8 @@ fn encode_value(v: &Value) -> Json {
             }
             Json::Object(m)
         }
+        Value::Variant(tag, val) => json!({ "tag": tag, "value": encode_value(val) }),
+        Value::Unserializable(s) => json!({ "#unserializable": s }),
         Value::Null => Json::Null,
     }
 }
@@ -89,7 +103,14 @@ pub(crate) fn prettify_value(v: &Value) -> Json {
         Value::Bool(b) => json!(b),
         Value::Str(s) => json!(s),
         Value::Set(items) => Json::Array(items.iter().map(prettify_value).collect()),
+        Value::Seq(items) => Json::Array(items.iter().map(prettify_value).collect()),
         Value::Tuple(items) => Json::Array(items.iter().map(prettify_value).collect()),
+        Value::Map(entries) => Json::Array(
+            entries
+                .iter()
+                .map(|(k, v)| Json::Array(vec![prettify_value(k), prettify_value(v)]))
+                .collect(),
+        ),
         Value::Record(rec) => {
             let mut m = serde_json::Map::new();
             for (k, iv) in rec {
@@ -97,6 +118,8 @@ pub(crate) fn prettify_value(v: &Value) -> Json {
             }
             Json::Object(m)
         }
+        Value::Variant(tag, val) => json!({ "tag": tag, "value": prettify_value(val) }),
+        Value::Unserializable(s) => json!(s),
         Value::Null => Json::Null,
     }
 }
@@ -214,16 +237,41 @@ impl Serialize for Value {
                 m.serialize_entry("val", items)?;
                 m.end()
             }
+            Value::Seq(items) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "seq")?;
+                m.serialize_entry("val", items)?;
+                m.end()
+            }
             Value::Tuple(items) => {
                 let mut m = s.serialize_map(Some(2))?;
                 m.serialize_entry("tag", "tuple")?;
                 m.serialize_entry("val", items)?;
                 m.end()
             }
+            Value::Map(entries) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "map")?;
+                m.serialize_entry("val", entries)?;
+                m.end()
+            }
             Value::Record(rec) => {
                 let mut m = s.serialize_map(Some(2))?;
                 m.serialize_entry("tag", "record")?;
                 m.serialize_entry("val", rec)?;
+                m.end()
+            }
+            Value::Variant(tag, val) => {
+                let mut m = s.serialize_map(Some(3))?;
+                m.serialize_entry("tag", "variant")?;
+                m.serialize_entry("variantTag", tag)?;
+                m.serialize_entry("value", val)?;
+                m.end()
+            }
+            Value::Unserializable(u) => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("tag", "unserializable")?;
+                m.serialize_entry("val", u)?;
                 m.end()
             }
             Value::Null => {
@@ -246,7 +294,7 @@ fn walk(v: &Json) -> Value {
         Json::Bool(b) => Value::Bool(*b),
         Json::String(s) => Value::Str(s.clone()),
         Json::Number(n) => Value::Int(number_to_bigint(n)),
-        Json::Array(items) => Value::Set(items.iter().map(walk).collect()),
+        Json::Array(items) => Value::Seq(items.iter().map(walk).collect()),
         Json::Object(obj) => {
             if let Some(Json::String(s)) = obj.get("#bigint") {
                 return Value::Int(s.parse::<BigInt>().unwrap_or_else(|_| BigInt::from(0)));
@@ -256,6 +304,22 @@ fn walk(v: &Json) -> Value {
             }
             if let Some(Json::Array(items)) = obj.get("#set") {
                 return Value::Set(items.iter().map(walk).collect());
+            }
+            if let Some(Json::Array(entries)) = obj.get("#map") {
+                let pairs = entries
+                    .iter()
+                    .filter_map(|e| match e {
+                        Json::Array(pair) if pair.len() == 2 => Some((walk(&pair[0]), walk(&pair[1]))),
+                        _ => None,
+                    })
+                    .collect();
+                return Value::Map(pairs);
+            }
+            if let Some(Json::String(u)) = obj.get("#unserializable") {
+                return Value::Unserializable(u.clone());
+            }
+            if let (Some(Json::String(tag)), Some(val)) = (obj.get("tag"), obj.get("value")) {
+                return Value::Variant(tag.clone(), Box::new(walk(val)));
             }
             let mut rec = State::new();
             for (k, iv) in obj {
