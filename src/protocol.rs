@@ -1,6 +1,8 @@
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use serde::de::Error as _;
 use serde::ser::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value as Json};
 use std::collections::BTreeMap;
 
@@ -62,7 +64,7 @@ pub enum DiffHint {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApalacheSpec {
     pub sources: Vec<String>,
 }
@@ -184,7 +186,7 @@ pub(crate) fn prettify_json(state: &State) -> String {
     serde_json::to_string(&prettify_state(state)).unwrap_or_default()
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApalacheConfig {
     pub spec_path: String,
@@ -200,7 +202,7 @@ pub struct ApalacheConfig {
     pub param_vars: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceGenerationConfig {
     pub num_traces: i64,
@@ -208,7 +210,7 @@ pub struct TraceGenerationConfig {
     pub view: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "proto_step", rename_all = "snake_case")]
 pub enum ClientMessage {
     Register {
@@ -231,7 +233,7 @@ pub enum ClientMessage {
         #[serde(rename = "traceConfig")]
         trace_config: TraceGenerationConfig,
         #[serde(rename = "destPath")]
-        dest_path: String,
+        dest_path: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         spec: Option<ApalacheSpec>,
     },
@@ -242,6 +244,37 @@ pub enum ClientMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         spec: Option<ApalacheSpec>,
     },
+    RegisterValidateAsync {
+        #[serde(rename = "apalacheConfig")]
+        apalache_config: ApalacheConfig,
+        bound: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        spec: Option<ApalacheSpec>,
+    },
+    RegisterTraceGenAsync {
+        #[serde(rename = "apalacheConfig")]
+        apalache_config: ApalacheConfig,
+        #[serde(rename = "traceConfig")]
+        trace_config: TraceGenerationConfig,
+        #[serde(rename = "destPath", skip_serializing_if = "Option::is_none")]
+        dest_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        spec: Option<ApalacheSpec>,
+    },
+    QueryJob {
+        #[serde(rename = "jobId")]
+        job_id: String,
+    },
+    AwaitJob {
+        #[serde(rename = "jobId")]
+        job_id: String,
+        #[serde(rename = "timeoutSecs", skip_serializing_if = "Option::is_none")]
+        timeout_secs: Option<u64>,
+    },
+    CancelJob {
+        #[serde(rename = "jobId")]
+        job_id: String,
+    },
     ReportState {
         state: State,
     },
@@ -251,6 +284,32 @@ pub enum ClientMessage {
 pub enum SpecResult {
     Valid,
     Invalid(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobKind {
+    Validate,
+    GenTraces,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobPhase {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobOutcome {
+    Validate(SpecResult),
+    GenTraces {
+        itf_trace_paths: Vec<String>,
+        itf_traces: Vec<Json>,
+    },
+    InfraError(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,12 +343,31 @@ pub enum MirrorMessage {
     RegisterError {
         error: String,
     },
+    JobAccepted {
+        job_id: String,
+        kind: JobKind,
+    },
+    JobStatus {
+        job_id: String,
+        phase: JobPhase,
+    },
+    JobResult {
+        job_id: String,
+        outcome: JobOutcome,
+    },
 }
 
 /// Serialize a Value directly in the clean ITF wire representation.
 impl Serialize for Value {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         encode_value(self).serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Json::deserialize(deserializer)?;
+        walk(&value).map_err(D::Error::custom)
     }
 }
 
@@ -504,6 +582,59 @@ fn decode_hint(value: &Json) -> Result<DiffHint, crate::Error> {
     }
 }
 
+fn decode_spec_result(value: Option<&Json>) -> Result<SpecResult, crate::Error> {
+    match value {
+        Some(Json::String(s)) if s == "valid" => Ok(SpecResult::Valid),
+        Some(Json::Object(result)) => {
+            let detail = result
+                .get("invalid")
+                .and_then(Json::as_str)
+                .ok_or_else(|| invalid_value("invalid spec result must contain a string"))?;
+            Ok(SpecResult::Invalid(detail.to_string()))
+        }
+        _ => Err(invalid_value("spec result has an invalid shape")),
+    }
+}
+
+fn string_array(value: Option<&Json>, field: &str) -> Result<Vec<String>, crate::Error> {
+    value
+        .and_then(Json::as_array)
+        .ok_or_else(|| invalid_value(format!("{field} must be an array")))?
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| invalid_value(format!("{field} entries must be strings")))
+        })
+        .collect()
+}
+
+fn decode_job_outcome(value: Option<&Json>) -> Result<JobOutcome, crate::Error> {
+    let outcome = value
+        .and_then(Json::as_object)
+        .ok_or_else(|| invalid_value("job_result.outcome must be an object"))?;
+    if let Some(validate) = outcome.get("validate") {
+        return Ok(JobOutcome::Validate(decode_spec_result(Some(validate))?));
+    }
+    if let Some(gen) = outcome.get("genTraces").and_then(Json::as_object) {
+        let itf_trace_paths = string_array(gen.get("itfTracePaths"), "itfTracePaths")?;
+        let itf_traces = match gen.get("itfTraces") {
+            None => Vec::new(),
+            Some(Json::Array(traces)) => traces.clone(),
+            Some(_) => return Err(invalid_value("itfTraces must be an array")),
+        };
+        return Ok(JobOutcome::GenTraces {
+            itf_trace_paths,
+            itf_traces,
+        });
+    }
+    if let Some(error) = outcome.get("error").and_then(Json::as_str) {
+        return Ok(JobOutcome::InfraError(error.to_string()));
+    }
+    Err(invalid_value("unknown job_result outcome"))
+}
+
 fn walk_message(obj: &serde_json::Map<String, Json>) -> Result<MirrorMessage, crate::Error> {
     let step = obj
         .get("proto_step")
@@ -511,19 +642,7 @@ fn walk_message(obj: &serde_json::Map<String, Json>) -> Result<MirrorMessage, cr
         .ok_or_else(|| invalid_value("proto_step must be a string"))?;
     Ok(match step {
         "spec_validated" => {
-            let result = match obj.get("result") {
-                Some(Json::String(s)) if s == "valid" => SpecResult::Valid,
-                Some(Json::Object(result)) if result.len() == 1 => {
-                    let detail = result
-                        .get("invalid")
-                        .and_then(Json::as_str)
-                        .ok_or_else(|| {
-                            invalid_value("invalid spec result must contain a string")
-                        })?;
-                    SpecResult::Invalid(detail.to_string())
-                }
-                _ => return Err(invalid_value("spec_validated.result has an invalid shape")),
-            };
+            let result = decode_spec_result(obj.get("result"))?;
             MirrorMessage::SpecValidated { result }
         }
         "initial_state" => MirrorMessage::InitialState {
@@ -549,17 +668,7 @@ fn walk_message(obj: &serde_json::Map<String, Json>) -> Result<MirrorMessage, cr
         },
         "all_steps_done" => MirrorMessage::AllStepsDone,
         "gen_traces_done" => MirrorMessage::GenTracesDone {
-            itf_trace_paths: obj
-                .get("itfTracePaths")
-                .and_then(|v| v.as_array())
-                .ok_or_else(|| invalid_value("itfTracePaths must be an array"))?
-                .iter()
-                .map(|x| {
-                    x.as_str()
-                        .map(String::from)
-                        .ok_or_else(|| invalid_value("itfTracePaths entries must be strings"))
-                })
-                .collect::<Result<_, _>>()?,
+            itf_trace_paths: string_array(obj.get("itfTracePaths"), "itfTracePaths")?,
             itf_traces: match obj.get("itfTraces") {
                 None => Vec::new(),
                 Some(Json::Array(traces)) => traces.clone(),
@@ -571,6 +680,30 @@ fn walk_message(obj: &serde_json::Map<String, Json>) -> Result<MirrorMessage, cr
         },
         "register_error" => MirrorMessage::RegisterError {
             error: str_field(obj, "error")?,
+        },
+        "job_accepted" => MirrorMessage::JobAccepted {
+            job_id: str_field(obj, "jobId")?,
+            kind: match obj.get("kind").and_then(Json::as_str) {
+                Some("validate") => JobKind::Validate,
+                Some("gen_traces") => JobKind::GenTraces,
+                _ => return Err(invalid_value("job_accepted.kind has an invalid value")),
+            },
+        },
+        "job_status" => MirrorMessage::JobStatus {
+            job_id: str_field(obj, "jobId")?,
+            phase: match obj.get("phase").and_then(Json::as_str) {
+                Some("pending") => JobPhase::Pending,
+                Some("running") => JobPhase::Running,
+                Some("done") => JobPhase::Done,
+                Some("failed") => JobPhase::Failed,
+                Some("cancelled") => JobPhase::Cancelled,
+                Some("unknown") => JobPhase::Unknown,
+                _ => return Err(invalid_value("job_status.phase has an invalid value")),
+            },
+        },
+        "job_result" => MirrorMessage::JobResult {
+            job_id: str_field(obj, "jobId")?,
+            outcome: decode_job_outcome(obj.get("outcome"))?,
         },
         other => MirrorMessage::ProtocolError {
             error: format!("unknown proto_step: {other}"),

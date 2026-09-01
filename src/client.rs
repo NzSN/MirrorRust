@@ -1,6 +1,6 @@
 use crate::protocol::{
     decode_mirror_message, encode_client_message, ApalacheConfig, ApalacheSpec, ClientMessage,
-    MirrorMessage, SpecResult, State, TraceGenerationConfig,
+    JobKind, JobOutcome, JobPhase, MirrorMessage, SpecResult, State, TraceGenerationConfig,
 };
 use crate::transport::{spawn_mirror, Transport};
 use crate::Error;
@@ -9,6 +9,18 @@ use crate::Error;
 pub struct GenTracesResult {
     pub itf_trace_paths: Vec<String>,
     pub itf_traces: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobAccepted {
+    pub job_id: String,
+    pub kind: JobKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobReply {
+    Status { job_id: String, phase: JobPhase },
+    Result { job_id: String, outcome: JobOutcome },
 }
 
 /// Computes the next reported state for each protocol step.
@@ -152,7 +164,7 @@ pub fn run_client_gen_traces_transport(
     t.send(&encode_client_message(&ClientMessage::RegisterTraceGen {
         apalache_config,
         trace_config,
-        dest_path: dest_path.to_string(),
+        dest_path: Some(dest_path.to_string()),
         spec,
     }))?;
     gen_traces_loop(t)
@@ -203,6 +215,138 @@ pub fn run_client_validate_transport(
     };
     let _ = t.close();
     result
+}
+
+/// Submit a validation job over a server-mode TCP or mTLS transport.
+pub fn submit_validate_async(
+    t: &mut Transport,
+    apalache_config: ApalacheConfig,
+    bound: u32,
+    spec: Option<ApalacheSpec>,
+) -> Result<JobAccepted, Error> {
+    if !(1..=100).contains(&bound) {
+        return Err(Error::InvalidArgument(
+            "validate bound must be in [1, 100]".into(),
+        ));
+    }
+    if !t.is_async_capable() {
+        return Err(Error::InvalidArgument(
+            "async jobs require a TCP or mTLS server-mode transport".into(),
+        ));
+    }
+    t.send(&encode_client_message(
+        &ClientMessage::RegisterValidateAsync {
+            apalache_config,
+            bound,
+            spec,
+        },
+    ))?;
+    match recv(t)? {
+        MirrorMessage::JobAccepted { job_id, kind } => Ok(JobAccepted { job_id, kind }),
+        MirrorMessage::RegisterError { error } => Err(Error::RegisterFailed(error)),
+        MirrorMessage::ProtocolError { error } => {
+            let _ = t.close();
+            Err(Error::ProtocolError(error))
+        }
+        other => {
+            let _ = t.close();
+            Err(Error::UnexpectedMessage(format!(
+                "expected job_accepted, got {other:?}"
+            )))
+        }
+    }
+}
+
+pub fn submit_trace_gen_async(
+    t: &mut Transport,
+    apalache_config: ApalacheConfig,
+    trace_config: TraceGenerationConfig,
+    dest_path: Option<String>,
+    spec: Option<ApalacheSpec>,
+) -> Result<JobAccepted, Error> {
+    assert_async_capable(t)?;
+    t.send(&encode_client_message(
+        &ClientMessage::RegisterTraceGenAsync {
+            apalache_config,
+            trace_config,
+            dest_path,
+            spec,
+        },
+    ))?;
+    match recv(t)? {
+        MirrorMessage::JobAccepted { job_id, kind } => Ok(JobAccepted { job_id, kind }),
+        MirrorMessage::RegisterError { error } => Err(Error::RegisterFailed(error)),
+        MirrorMessage::ProtocolError { error } => {
+            let _ = t.close();
+            Err(Error::ProtocolError(error))
+        }
+        other => {
+            let _ = t.close();
+            Err(Error::UnexpectedMessage(format!(
+                "expected job_accepted, got {other:?}"
+            )))
+        }
+    }
+}
+
+fn assert_async_capable(t: &Transport) -> Result<(), Error> {
+    if t.is_async_capable() {
+        Ok(())
+    } else {
+        Err(Error::InvalidArgument(
+            "async jobs require a TCP or mTLS server-mode transport".into(),
+        ))
+    }
+}
+
+fn decode_job_reply(t: &mut Transport, message: MirrorMessage) -> Result<JobReply, Error> {
+    match message {
+        MirrorMessage::JobStatus { job_id, phase } => Ok(JobReply::Status { job_id, phase }),
+        MirrorMessage::JobResult { job_id, outcome } => Ok(JobReply::Result { job_id, outcome }),
+        MirrorMessage::RegisterError { error } => Err(Error::RegisterFailed(error)),
+        MirrorMessage::ProtocolError { error } => {
+            let _ = t.close();
+            Err(Error::ProtocolError(error))
+        }
+        other => {
+            let _ = t.close();
+            Err(Error::UnexpectedMessage(format!(
+                "expected job_status or job_result, got {other:?}"
+            )))
+        }
+    }
+}
+
+pub fn query_job(t: &mut Transport, job_id: &str) -> Result<JobReply, Error> {
+    assert_async_capable(t)?;
+    t.send(&encode_client_message(&ClientMessage::QueryJob {
+        job_id: job_id.to_string(),
+    }))?;
+    let message = recv(t)?;
+    decode_job_reply(t, message)
+}
+
+pub fn await_job(
+    t: &mut Transport,
+    job_id: &str,
+    timeout_secs: Option<u64>,
+) -> Result<JobReply, Error> {
+    assert_async_capable(t)?;
+    t.send(&encode_client_message(&ClientMessage::AwaitJob {
+        job_id: job_id.to_string(),
+        timeout_secs,
+    }))?;
+    let message = recv(t)?;
+    decode_job_reply(t, message)
+}
+
+pub fn cancel_job(t: &mut Transport, job_id: &str) -> Result<JobReply, Error> {
+    assert_async_capable(t)?;
+    t.send(&encode_client_message(&ClientMessage::CancelJob {
+        job_id: job_id.to_string(),
+    }))?;
+    let message = recv(t)?;
+    decode_job_reply(t, message)
 }
 
 fn recv(t: &mut Transport) -> Result<MirrorMessage, Error> {

@@ -1,5 +1,6 @@
 pub mod client;
 pub mod protocol;
+pub mod registry;
 pub mod spec;
 pub mod transport;
 
@@ -7,17 +8,20 @@ use protocol::prettify_json;
 
 pub use protocol::{
     as_int, as_record, as_str, decode_mirror_message, encode_client_message, encode_state,
-    get_param, get_param_int, ApalacheConfig, ApalacheSpec, ClientMessage, DiffHint, MirrorMessage,
-    PathSegment, SpecResult, State, TraceGenerationConfig, Value,
+    get_param, get_param_int, ApalacheConfig, ApalacheSpec, ClientMessage, DiffHint, JobKind,
+    JobOutcome, JobPhase, MirrorMessage, PathSegment, SpecResult, State, TraceGenerationConfig,
+    Value,
 };
 
 pub use client::{
-    preset_client, run_client, run_client_gen_traces, run_client_gen_traces_transport,
-    run_client_gen_traces_with_inline_spec, run_client_validate, run_client_validate_transport,
-    run_client_with_inline_spec, run_client_with_traces, run_client_with_traces_transport,
-    run_client_with_transport, GenTracesResult, PresetClient, StateComputer,
+    await_job, cancel_job, preset_client, query_job, run_client, run_client_gen_traces,
+    run_client_gen_traces_transport, run_client_gen_traces_with_inline_spec, run_client_validate,
+    run_client_validate_transport, run_client_with_inline_spec, run_client_with_traces,
+    run_client_with_traces_transport, run_client_with_transport, submit_trace_gen_async,
+    submit_validate_async, GenTracesResult, JobAccepted, JobReply, PresetClient, StateComputer,
 };
 
+pub use registry::{connect_mirror_from_registry, discover_mirrors, MirrorServiceInfo};
 pub use spec::{spec_from_file, spec_from_files};
 pub use transport::{
     connect_mirror, connect_tls_mirror, spawn_mirror, validate_protocol_line, TlsOptions,
@@ -51,6 +55,8 @@ pub enum Error {
     TransportClosed,
     #[error("TLS: {0}")]
     Tls(String),
+    #[error("registry: {0}")]
+    Registry(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]

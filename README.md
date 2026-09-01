@@ -8,7 +8,7 @@ plain TCP, or TLS 1.3 mutual TLS.
 
 ```bash
 cargo build
-cargo test                       # unit/protocol tests (no binary needed)
+MIRRORS_FIXTURES=/path/to/Mirrors/test/fixtures cargo test
 MIRROR_BIN=/path/to/ModelMirrors \
   SPEC=/path/to/authoritative/Counter.tla cargo test --test smoke
 MIRROR_BIN=/path/to/ModelMirrors \
@@ -20,9 +20,11 @@ that exact model inline, generates traces, and replays them through the Rust
 state computer.
 
 The server-mode smoke replays the same inline Counter model through real
-`mirror --serve` and `mirror --server --tls` processes. Its mTLS leg generates
-an ephemeral PKI and also checks SAN-only identity, certificate pinning, and
-POSIX client-key permissions.
+`mirror --serve` and `mirror --server --tls` processes, then deliberately adds
+an observable state key and requires `step_mismatch`. It also covers async job
+ordering/cancellation/eviction/queue pressure and uses an ephemeral PKI to test
+TLS 1.3-only negotiation, SAN-only identity, client authentication,
+certificate pinning, registry failover, and POSIX client-key permissions.
 
 ## Quick Start
 
@@ -102,6 +104,8 @@ by group or other users on POSIX.
 - `run_client_with_traces(bin, apalache_config, trace_paths, compute)` — replay given ITF traces.
 - `run_client_gen_traces(...)` / `run_client_gen_traces_with_inline_spec(...)` — generate traces and return paths plus inline ITF data.
 - `run_client_validate(bin, apalache_config, bound, spec)` — validate-only flow; bounds are checked in `[1, 100]`.
+- `submit_validate_async`, `submit_trace_gen_async`, `query_job`, `await_job`,
+  and `cancel_job` — server-mode async jobs with cross-connection job IDs.
 - `run_client_with_transport` and the other `*_transport` variants — consume
   an already connected TCP/mTLS transport for one session.
 - `spec_from_file` / `spec_from_files` — build a root-first, canonical-path-deduplicated `EXTENDS`/`INSTANCE` closure.
@@ -109,14 +113,15 @@ by group or other users on POSIX.
 - Helpers: `as_int`, `as_str`, `as_record`, `get_param`, `get_param_int`.
 - Encoding: `encode_state`, `encode_client_message`, `decode_mirror_message`.
 - Transport: `spawn_mirror`, `connect_mirror`, `connect_tls_mirror`,
-  `TlsOptions`, `Transport`.
+  `connect_mirror_from_registry`, `discover_mirrors`, `TlsOptions`, `Transport`.
 
 ## Protocol conformance
 
 MirrorRust exposes the synchronous `register`, `register_traces`,
-`register_trace_gen`, and `register_validate` flows over stdio, TCP, and mTLS.
-Registry discovery, explorer sessions, and async job messages are not yet
-exposed.
+`register_trace_gen`, and `register_validate` flows over stdio, TCP, and mTLS,
+plus the server-mode async job protocol and Consul-compatible mTLS registry
+discovery. Explorer sessions are not yet exposed and are outside the supported
+client-message subset checked by the canonical corpus test.
 
 All outbound messages are one non-empty UTF-8 JSON object per line. Payloads
 larger than 65,535 bytes or containing an embedded LF are rejected before any

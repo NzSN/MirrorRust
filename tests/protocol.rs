@@ -161,7 +161,10 @@ fn encode_report_state_uses_clean_itf_values() {
     assert_eq!(v["state"]["flag"], json!(true));
 }
 
-use mirrorrust::{decode_mirror_message, DiffHint, MirrorMessage, PathSegment, SpecResult};
+use mirrorrust::{
+    decode_mirror_message, DiffHint, JobKind, JobOutcome, JobPhase, MirrorMessage, PathSegment,
+    SpecResult,
+};
 
 #[test]
 fn decode_spec_validated_valid() {
@@ -520,4 +523,149 @@ fn preset_client_panics_when_exhausted() {
     let mut pc = preset_client(vec![]);
     let empty = State::new();
     let _ = pc.compute("init", &empty, &empty);
+}
+
+#[test]
+fn encode_register_validate_async_matches_conformance_wire_shape() {
+    let message = ClientMessage::RegisterValidateAsync {
+        apalache_config: cfg(),
+        bound: 5,
+        spec: None,
+    };
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&encode_client_message(&message)).unwrap(),
+        json!({
+            "proto_step": "register_validate_async",
+            "apalacheConfig": {
+                "specPath": "/foo/bar.tla",
+                "invariant": "TraceComplete",
+                "lengthBound": 5
+            },
+            "bound": 5
+        })
+    );
+}
+
+#[test]
+fn encode_async_trace_and_job_control_messages_match_conformance_shapes() {
+    let trace = ClientMessage::RegisterTraceGenAsync {
+        apalache_config: cfg(),
+        trace_config: TraceGenerationConfig {
+            num_traces: 2,
+            view: None,
+        },
+        dest_path: None,
+        spec: None,
+    };
+    let value = |message: &ClientMessage| {
+        serde_json::from_str::<serde_json::Value>(&encode_client_message(message)).unwrap()
+    };
+
+    assert_eq!(
+        value(&trace),
+        json!({
+            "proto_step": "register_trace_gen_async",
+            "apalacheConfig": {
+                "specPath": "/foo/bar.tla",
+                "invariant": "TraceComplete",
+                "lengthBound": 5
+            },
+            "traceConfig": { "numTraces": 2 }
+        })
+    );
+    assert_eq!(
+        value(&ClientMessage::QueryJob {
+            job_id: "job-1".into()
+        }),
+        json!({ "proto_step": "query_job", "jobId": "job-1" })
+    );
+    assert_eq!(
+        value(&ClientMessage::AwaitJob {
+            job_id: "job-1".into(),
+            timeout_secs: Some(30),
+        }),
+        json!({ "proto_step": "await_job", "jobId": "job-1", "timeoutSecs": 30 })
+    );
+    assert_eq!(
+        value(&ClientMessage::AwaitJob {
+            job_id: "job-1".into(),
+            timeout_secs: None,
+        }),
+        json!({ "proto_step": "await_job", "jobId": "job-1" })
+    );
+    assert_eq!(
+        value(&ClientMessage::CancelJob {
+            job_id: "job-1".into()
+        }),
+        json!({ "proto_step": "cancel_job", "jobId": "job-1" })
+    );
+}
+
+#[test]
+fn decode_async_job_replies_preserves_kinds_phases_and_outcomes() {
+    assert_eq!(
+        decode_mirror_message(
+            r#"{"proto_step":"job_accepted","jobId":"job-1","kind":"validate","future":true}"#,
+        )
+        .unwrap(),
+        MirrorMessage::JobAccepted {
+            job_id: "job-1".into(),
+            kind: JobKind::Validate,
+        }
+    );
+
+    for (wire, phase) in [
+        ("pending", JobPhase::Pending),
+        ("running", JobPhase::Running),
+        ("done", JobPhase::Done),
+        ("failed", JobPhase::Failed),
+        ("cancelled", JobPhase::Cancelled),
+        ("unknown", JobPhase::Unknown),
+    ] {
+        assert_eq!(
+            decode_mirror_message(&format!(
+                r#"{{"proto_step":"job_status","jobId":"job-1","phase":"{wire}"}}"#
+            ))
+            .unwrap(),
+            MirrorMessage::JobStatus {
+                job_id: "job-1".into(),
+                phase,
+            }
+        );
+    }
+
+    assert_eq!(
+        decode_mirror_message(
+            r#"{"proto_step":"job_result","jobId":"job-1","outcome":{"validate":"valid"}}"#,
+        )
+        .unwrap(),
+        MirrorMessage::JobResult {
+            job_id: "job-1".into(),
+            outcome: JobOutcome::Validate(SpecResult::Valid),
+        }
+    );
+    assert_eq!(
+        decode_mirror_message(
+            r#"{"proto_step":"job_result","jobId":"job-2","outcome":{"genTraces":{"itfTracePaths":["t.itf.json"],"itfTraces":[{"states":[]}]}}}"#,
+        )
+        .unwrap(),
+        MirrorMessage::JobResult {
+            job_id: "job-2".into(),
+            outcome: JobOutcome::GenTraces {
+                itf_trace_paths: vec!["t.itf.json".into()],
+                itf_traces: vec![json!({ "states": [] })],
+            },
+        }
+    );
+    assert_eq!(
+        decode_mirror_message(
+            r#"{"proto_step":"job_result","jobId":"job-3","outcome":{"error":"worker died"}}"#,
+        )
+        .unwrap(),
+        MirrorMessage::JobResult {
+            job_id: "job-3".into(),
+            outcome: JobOutcome::InfraError("worker died".into()),
+        }
+    );
 }
