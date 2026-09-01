@@ -1,10 +1,15 @@
 use crate::protocol::{
-    decode_mirror_message, encode_client_message, encode_state, ApalacheConfig, ClientMessage,
+    decode_mirror_message, encode_client_message, ApalacheConfig, ApalacheSpec, ClientMessage,
     MirrorMessage, SpecResult, State, TraceGenerationConfig,
 };
 use crate::transport::{spawn_mirror, Transport};
 use crate::Error;
-use serde_json::json;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenTracesResult {
+    pub itf_trace_paths: Vec<String>,
+    pub itf_traces: Vec<serde_json::Value>,
+}
 
 /// Computes the next reported state for each protocol step.
 pub trait StateComputer {
@@ -48,10 +53,39 @@ pub fn run_client(
     trace_config: TraceGenerationConfig,
     compute: impl StateComputer,
 ) -> Result<(), Error> {
-    let mut t = spawn_mirror(bin_path)?;
+    run_client_with_inline_spec(bin_path, apalache_config, trace_config, compute, None)
+}
+
+pub fn run_client_with_inline_spec(
+    bin_path: &str,
+    apalache_config: ApalacheConfig,
+    trace_config: TraceGenerationConfig,
+    compute: impl StateComputer,
+    spec: Option<ApalacheSpec>,
+) -> Result<(), Error> {
+    run_client_with_transport(
+        spawn_mirror(bin_path)?,
+        apalache_config,
+        trace_config,
+        compute,
+        spec,
+    )
+}
+
+/// Run a generated-trace replay on an already connected transport.
+/// The transport is consumed because one physical connection carries exactly
+/// one Mirrors session.
+pub fn run_client_with_transport(
+    mut t: Transport,
+    apalache_config: ApalacheConfig,
+    trace_config: TraceGenerationConfig,
+    compute: impl StateComputer,
+    spec: Option<ApalacheSpec>,
+) -> Result<(), Error> {
     t.send(&encode_client_message(&ClientMessage::Register {
         apalache_config,
         trace_config,
+        spec,
     }))?;
     main_loop(t, compute)
 }
@@ -62,7 +96,20 @@ pub fn run_client_with_traces(
     trace_paths: Vec<String>,
     compute: impl StateComputer,
 ) -> Result<(), Error> {
-    let mut t = spawn_mirror(bin_path)?;
+    run_client_with_traces_transport(
+        spawn_mirror(bin_path)?,
+        apalache_config,
+        trace_paths,
+        compute,
+    )
+}
+
+pub fn run_client_with_traces_transport(
+    mut t: Transport,
+    apalache_config: ApalacheConfig,
+    trace_paths: Vec<String>,
+    compute: impl StateComputer,
+) -> Result<(), Error> {
     t.send(&encode_client_message(&ClientMessage::RegisterTraces {
         apalache_config,
         itf_trace_paths: trace_paths,
@@ -75,14 +122,87 @@ pub fn run_client_gen_traces(
     apalache_config: ApalacheConfig,
     dest_path: &str,
     trace_config: TraceGenerationConfig,
-) -> Result<(), Error> {
-    let mut t = spawn_mirror(bin_path)?;
+) -> Result<GenTracesResult, Error> {
+    run_client_gen_traces_with_inline_spec(bin_path, apalache_config, dest_path, trace_config, None)
+}
+
+pub fn run_client_gen_traces_with_inline_spec(
+    bin_path: &str,
+    apalache_config: ApalacheConfig,
+    dest_path: &str,
+    trace_config: TraceGenerationConfig,
+    spec: Option<ApalacheSpec>,
+) -> Result<GenTracesResult, Error> {
+    run_client_gen_traces_transport(
+        spawn_mirror(bin_path)?,
+        apalache_config,
+        dest_path,
+        trace_config,
+        spec,
+    )
+}
+
+pub fn run_client_gen_traces_transport(
+    mut t: Transport,
+    apalache_config: ApalacheConfig,
+    dest_path: &str,
+    trace_config: TraceGenerationConfig,
+    spec: Option<ApalacheSpec>,
+) -> Result<GenTracesResult, Error> {
     t.send(&encode_client_message(&ClientMessage::RegisterTraceGen {
         apalache_config,
         trace_config,
         dest_path: dest_path.to_string(),
+        spec,
     }))?;
     gen_traces_loop(t)
+}
+
+pub fn run_client_validate(
+    bin_path: &str,
+    apalache_config: ApalacheConfig,
+    bound: u32,
+    spec: Option<ApalacheSpec>,
+) -> Result<(), Error> {
+    if !(1..=100).contains(&bound) {
+        return Err(Error::InvalidArgument(
+            "validate bound must be in [1, 100]".into(),
+        ));
+    }
+    run_client_validate_transport(spawn_mirror(bin_path)?, apalache_config, bound, spec)
+}
+
+pub fn run_client_validate_transport(
+    mut t: Transport,
+    apalache_config: ApalacheConfig,
+    bound: u32,
+    spec: Option<ApalacheSpec>,
+) -> Result<(), Error> {
+    if !(1..=100).contains(&bound) {
+        return Err(Error::InvalidArgument(
+            "validate bound must be in [1, 100]".into(),
+        ));
+    }
+    t.send(&encode_client_message(&ClientMessage::RegisterValidate {
+        apalache_config,
+        bound,
+        spec,
+    }))?;
+    let result = match recv(&mut t)? {
+        MirrorMessage::SpecValidated {
+            result: SpecResult::Valid,
+        } => Ok(()),
+        MirrorMessage::SpecValidated {
+            result: SpecResult::Invalid(detail),
+        } => Err(Error::SpecInvalid(detail)),
+        MirrorMessage::ProtocolError { error } => Err(Error::ProtocolError(error)),
+        MirrorMessage::RegisterError { error } => Err(Error::RegisterFailed(error)),
+        other => Err(Error::UnexpectedMessage(format!(
+            "expected spec_validated, got {other:?}"
+        ))),
+    };
+    let _ = t.close();
+    result
 }
 
 fn recv(t: &mut Transport) -> Result<MirrorMessage, Error> {
@@ -93,11 +213,9 @@ fn recv(t: &mut Transport) -> Result<MirrorMessage, Error> {
 }
 
 fn encode_report_state(state: &State) -> String {
-    serde_json::to_string(&json!({
-        "proto_step": "report_state",
-        "state": encode_state(state),
-    }))
-    .expect("report_state serialization cannot fail")
+    encode_client_message(&ClientMessage::ReportState {
+        state: state.clone(),
+    })
 }
 
 fn main_loop(mut t: Transport, mut compute: impl StateComputer) -> Result<(), Error> {
@@ -108,10 +226,12 @@ fn main_loop(mut t: Transport, mut compute: impl StateComputer) -> Result<(), Er
 
 fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<(), Error> {
     match recv(t)? {
-        MirrorMessage::SpecValidated { result: SpecResult::Valid } => {}
-        MirrorMessage::SpecValidated { result: SpecResult::Invalid(s) } => {
-            return Err(Error::SpecInvalid(s))
-        }
+        MirrorMessage::SpecValidated {
+            result: SpecResult::Valid,
+        } => {}
+        MirrorMessage::SpecValidated {
+            result: SpecResult::Invalid(s),
+        } => return Err(Error::SpecInvalid(s)),
         MirrorMessage::ProtocolError { error } => return Err(Error::ProtocolError(error)),
         MirrorMessage::RegisterError { error } => return Err(Error::RegisterFailed(error)),
         other => {
@@ -127,7 +247,10 @@ fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<
 
     loop {
         match recv(t)? {
-            MirrorMessage::InitialState { action, state: from_mirror } => {
+            MirrorMessage::InitialState {
+                action,
+                state: from_mirror,
+            } => {
                 last_action = action.clone();
                 state = compute.compute(&action, &from_mirror, &State::new());
                 t.send(&encode_report_state(&state))?;
@@ -141,32 +264,46 @@ fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<
             }
             MirrorMessage::StepOk => {}
             MirrorMessage::AllStepsDone => return Ok(()),
-            MirrorMessage::StepMismatch { action, expected, actual } => {
+            MirrorMessage::StepMismatch {
+                action,
+                expected,
+                actual,
+                hints,
+            } => {
                 return Err(Error::StepMismatch {
                     action: action.unwrap_or(last_action),
                     params: last_param,
                     expected,
                     actual,
+                    hints,
                 })
             }
             MirrorMessage::ProtocolError { error } => return Err(Error::ProtocolError(error)),
             MirrorMessage::RegisterError { error } => return Err(Error::RegisterFailed(error)),
             other => {
-                return Err(Error::UnexpectedMessage(format!("unexpected message: {other:?}")))
+                return Err(Error::UnexpectedMessage(format!(
+                    "unexpected message: {other:?}"
+                )))
             }
         }
     }
 }
 
-fn gen_traces_loop(mut t: Transport) -> Result<(), Error> {
+fn gen_traces_loop(mut t: Transport) -> Result<GenTracesResult, Error> {
     let result = run_gen_traces_loop(&mut t);
     let _ = t.close();
     result
 }
 
-fn run_gen_traces_loop(t: &mut Transport) -> Result<(), Error> {
+fn run_gen_traces_loop(t: &mut Transport) -> Result<GenTracesResult, Error> {
     match recv(t)? {
-        MirrorMessage::GenTracesDone { .. } => Ok(()),
+        MirrorMessage::GenTracesDone {
+            itf_trace_paths,
+            itf_traces,
+        } => Ok(GenTracesResult {
+            itf_trace_paths,
+            itf_traces,
+        }),
         MirrorMessage::ProtocolError { error } => Err(Error::ProtocolError(error)),
         MirrorMessage::RegisterError { error } => Err(Error::RegisterFailed(error)),
         other => Err(Error::UnexpectedMessage(format!(

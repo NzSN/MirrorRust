@@ -1,6 +1,7 @@
 use mirrorrust::{
-    as_int, get_param, preset_client, run_client, run_client_gen_traces, run_client_with_traces,
-    ApalacheConfig, State, StateComputer, TraceGenerationConfig, Value,
+    as_int, get_param, preset_client, run_client_gen_traces, run_client_validate,
+    run_client_with_inline_spec, run_client_with_traces, spec_from_file, ApalacheConfig, State,
+    StateComputer, TraceGenerationConfig, Value,
 };
 use num_bigint::BigInt;
 
@@ -25,7 +26,10 @@ fn apalache_config() -> ApalacheConfig {
 }
 
 fn trace_config() -> TraceGenerationConfig {
-    TraceGenerationConfig { num_traces: 100, view: Some("View".into()) }
+    TraceGenerationConfig {
+        num_traces: 100,
+        view: Some("View".into()),
+    }
 }
 
 struct CounterComputer {
@@ -34,7 +38,9 @@ struct CounterComputer {
 
 impl CounterComputer {
     fn new() -> Self {
-        CounterComputer { count: BigInt::from(0) }
+        CounterComputer {
+            count: BigInt::from(0),
+        }
     }
     fn to_state(&self) -> State {
         st(vec![("count", Value::Int(self.count.clone()))])
@@ -68,8 +74,25 @@ fn smoke() {
     };
 
     // register (trace generation + replay)
-    run_client(&bin, apalache_config(), trace_config(), CounterComputer::new())
-        .expect("register smoke test failed");
+    let counter_spec = spec_path();
+    let inline_spec = spec_from_file(&counter_spec).expect("inline spec closure");
+    let mut inline_cfg = apalache_config();
+    inline_cfg.spec_path = "Counter.tla".into();
+    run_client_with_inline_spec(
+        &bin,
+        inline_cfg,
+        trace_config(),
+        CounterComputer::new(),
+        Some(inline_spec),
+    )
+    .expect("register smoke test failed");
+
+    // register_validate with the same server-independent inline closure.
+    let validate_spec = spec_from_file(&counter_spec).expect("validate inline spec");
+    let mut validate_cfg = apalache_config();
+    validate_cfg.spec_path = "Counter.tla".into();
+    run_client_validate(&bin, validate_cfg, 1, Some(validate_spec))
+        .expect("register_validate smoke test failed");
 
     // register_traces (replay a pre-generated trace against fixed states)
     let trace_path = std::fs::canonicalize("specs/traces/violation.itf.json")
@@ -85,18 +108,24 @@ fn smoke() {
         st(vec![("count", Value::Int(BigInt::from(10)))]),
         st(vec![("count", Value::Int(BigInt::from(13)))]),
     ];
-    run_client_with_traces(&bin, apalache_config(), vec![trace_path], preset_client(states))
-        .expect("register_traces smoke test failed");
+    run_client_with_traces(
+        &bin,
+        apalache_config(),
+        vec![trace_path],
+        preset_client(states),
+    )
+    .expect("register_traces smoke test failed");
 
     // register_trace_gen (write traces to a temp dir)
     let dir = tempfile::tempdir().expect("tempdir");
-    run_client_gen_traces(
+    let generated = run_client_gen_traces(
         &bin,
         apalache_config(),
         dir.path().to_str().unwrap(),
         trace_config(),
     )
     .expect("register_trace_gen smoke test failed");
+    assert!(!generated.itf_trace_paths.is_empty());
     let count = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
