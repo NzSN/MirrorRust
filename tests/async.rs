@@ -268,3 +268,79 @@ fn _trace_config() -> TraceGenerationConfig {
         view: None,
     }
 }
+
+#[test]
+fn rejects_uncorrelated_and_malformed_async_replies() {
+    for reply in [
+        r#"{"proto_step":"job_status","jobId":"other","phase":"running"}"#,
+        r#"{"proto_step":"job_result","jobId":"other","outcome":{"validate":"valid"}}"#,
+        "{bad json",
+    ] {
+        for operation in 0..3 {
+            let (port, server) = scripted_server(move |_, socket| {
+                writeln!(socket, "{reply}").unwrap();
+            });
+            let mut t = connect_mirror("127.0.0.1", port).unwrap();
+            let result = match operation {
+                0 => query_job(&mut t, "expected"),
+                1 => await_job(&mut t, "expected", Some(1)),
+                _ => cancel_job(&mut t, "expected"),
+            };
+            assert!(result.is_err());
+            assert!(matches!(t.send("{}"), Err(Error::TransportClosed)));
+            server.join().unwrap();
+        }
+    }
+}
+
+#[test]
+fn rejects_wrong_submission_kind() {
+    let (port, server) = scripted_server(|_, socket| {
+        writeln!(
+            socket,
+            "{{\"proto_step\":\"job_accepted\",\"jobId\":\"job-1\",\"kind\":\"gen_traces\"}}"
+        )
+        .unwrap();
+    });
+    let mut t = connect_mirror("127.0.0.1", port).unwrap();
+    assert!(submit_validate_async(&mut t, cfg(), 3, None).is_err());
+    assert!(matches!(t.send("{}"), Err(Error::TransportClosed)));
+    server.join().unwrap();
+}
+
+#[test]
+fn shared_async_reply_vectors() {
+    let path = std::env::var("MIRRORS_CLIENT_CONFORMANCE").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/client-conformance/async-replies.json"
+        )
+        .into()
+    });
+    let corpus: Value = serde_json::from_str(
+        &std::fs::read_to_string(path).expect("shared conformance vectors required"),
+    )
+    .unwrap();
+    for case in corpus["cases"].as_array().unwrap() {
+        let reply = case["reply"].clone();
+        let (port, server) = scripted_server(move |_, socket| {
+            writeln!(socket, "{reply}").unwrap();
+        });
+        let mut t = connect_mirror("127.0.0.1", port).unwrap();
+        let request = &case["request"];
+        let accepted = match request["proto_step"].as_str().unwrap() {
+            "register_validate_async" => submit_validate_async(&mut t, cfg(), 3, None).is_ok(),
+            "query_job" => query_job(&mut t, request["jobId"].as_str().unwrap()).is_ok(),
+            "await_job" => await_job(&mut t, request["jobId"].as_str().unwrap(), Some(1)).is_ok(),
+            _ => panic!("unknown vector"),
+        };
+        assert_eq!(
+            accepted,
+            case["accept"].as_bool().unwrap(),
+            "{}",
+            case["name"]
+        );
+        let _ = t.close();
+        server.join().unwrap();
+    }
+}
