@@ -1,5 +1,11 @@
 # MirrorRust
 
+For repository ownership and language support, read the
+[framework map](../Mirrors/Docs/framework-map.md). Restricted evaluation uses the
+[Gate Rust SDK](../MirrorGate/sdk/rust/README.md) and
+[optional integration](../MirrorGate/integrations/mirrorrust/README.md). Its
+handwritten Counter fixture does not establish a generated Rust target.
+
 Rust client for the [Mirrors](https://github.com/NzSN/ModelMirrors) protocol —
 replay TLA+ traces against your state-machine implementation over stdio,
 plain TCP, or TLS 1.3 mutual TLS.
