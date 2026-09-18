@@ -712,7 +712,16 @@ fn walk_message(obj: &serde_json::Map<String, Json>) -> Result<MirrorMessage, cr
 }
 
 pub fn decode_mirror_message(line: &str) -> Result<MirrorMessage, crate::Error> {
-    let raw: Json = serde_json::from_str(line)?;
+    let raw = crate::json::parse(
+        line,
+        crate::json::Limits {
+            max_bytes: usize::MAX,
+            max_depth: 128,
+            max_nodes: 16_384,
+            reject_duplicate_keys: false,
+        },
+    )
+    .map_err(|error| crate::Error::ProtocolError(format!("invalid JSON: {error}")))?;
     match raw {
         Json::Object(obj) => walk_message(&obj),
         _ => Ok(MirrorMessage::ProtocolError {

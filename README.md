@@ -112,6 +112,10 @@ by group or other users on POSIX.
 - `preset_client(states)` — a `StateComputer` serving a fixed state sequence.
 - Helpers: `as_int`, `as_str`, `as_record`, `get_param`, `get_param_int`.
 - Encoding: `encode_state`, `encode_client_message`, `decode_mirror_message`.
+- Compiled model admission: `make_verify_request`,
+  `run_client_negotiated`, `run_client_with_traces_negotiated`, and their
+  transport variants, with an exact `CompiledAdapterRegistry` and deferred
+  `LocalBinding` factory.
 - Transport: `spawn_mirror`, `connect_mirror`, `connect_tls_mirror`,
   `connect_mirror_from_registry`, `discover_mirrors`, `TlsOptions`, `Transport`.
 
@@ -130,6 +134,12 @@ encoding. Incoming malformed ITF values, fractional JSON numbers, malformed
 messages, and malformed diff hints are errors rather than silent defaults.
 `protocol_error`, impossible replies, mismatches, and other terminal replies
 end the connection.
+
+Incoming JSON is decoded lexically so arbitrary-precision numbers remain exact
+and an ordinary record key named `$serde_json::private::Number` remains an
+ordinary key. Model-interface envelopes additionally reject duplicate keys,
+unknown versioned fields, invalid status-specific combinations, excessive
+depth/nodes, and noncanonical digests before any adapter callback runs.
 
 State values use the typed `Value` enum (`Int(BigInt)`, `Bool`, `Str`, `Set`, `Seq`, `Tuple`, `Map`, `Record`, `Variant`, `Unserializable`, `Null`), serialized to the Apalache ITF format (`{"#bigint":"42"}`, `{"#tup":[...]}`, `{"#set":[...]}`, `{"#map":[[k,v],...]}`, `{"tag":t,"value":v}`, `{"#unserializable":s}`; bare JSON arrays decode as `Seq`).
 
@@ -160,5 +170,16 @@ reply job ID. Send, read, decode, correlation and protocol failures close the
 connection while retaining the primary error. A registration rejection such as
 queue pressure leaves a valid connection usable. Mutable transport borrowing
 serializes exchanges; backend jobs submitted before awaiting can run concurrently.
-Model-interface negotiation/generated bindings and Gate evaluator facades are
-not implemented by this client; base-wire support does not imply those profiles.
+Compiled model-interface negotiation is available for reviewed metadata and
+exact local adapter registrations. MirrorRust does not claim a compiler-emitted
+`mirrorrust-v1` target; the Counter target in MirrorGate is a fixture-only
+`mirrorrust-counter-fixture-v1` acceptance binding. The optional Gate facade
+lives in `../MirrorGate/integrations/mirrorrust` and is not a MirrorRust runtime
+dependency.
+
+This source update adds the public `Error::ModelInterface` and
+`Error::Registration` variants. Callers that exhaustively match `Error` must add
+arms for local admission failures and structured server registration failures,
+respectively. Existing runner signatures and wire encodings are retained, but
+the enum addition is a Rust source-compatibility migration for exhaustive
+matches. Package publication and versioning are handled separately.

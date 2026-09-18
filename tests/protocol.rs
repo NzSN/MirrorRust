@@ -206,6 +206,24 @@ fn decode_initial_state() {
 }
 
 #[test]
+fn ordinary_serde_arbitrary_precision_key_remains_a_record_key() {
+    let message = decode_mirror_message(
+        r#"{"proto_step":"initial_state","action":"Init","state":{"nested":{"$serde_json::private::Number":"42"}}}"#,
+    )
+    .unwrap();
+    let MirrorMessage::InitialState { state, .. } = message else {
+        panic!("expected initial_state");
+    };
+    assert_eq!(
+        state.get("nested"),
+        Some(&Value::Record(std::collections::BTreeMap::from([(
+            "$serde_json::private::Number".into(),
+            Value::Str("42".into()),
+        )])))
+    );
+}
+
+#[test]
 fn decode_next_step() {
     let m = decode_mirror_message(
         r#"{"proto_step":"next_step","action":"Incr","parameters":{"by":1}}"#,

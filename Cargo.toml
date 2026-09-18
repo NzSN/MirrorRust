@@ -7,7 +7,7 @@ license = "ISC"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["arbitrary_precision"] }
+serde_json = { version = "1", features = ["arbitrary_precision", "unbounded_depth"] }
 num-bigint = "0.4"
 num-traits = "0.2"
 thiserror = "1"

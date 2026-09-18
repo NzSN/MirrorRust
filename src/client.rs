@@ -372,7 +372,7 @@ pub fn cancel_job(t: &mut Transport, job_id: &str) -> Result<JobReply, Error> {
     decode_job_reply(t, message, job_id)
 }
 
-fn recv(t: &mut Transport) -> Result<MirrorMessage, Error> {
+pub(crate) fn recv(t: &mut Transport) -> Result<MirrorMessage, Error> {
     match t.recv()? {
         Some(line) => decode_mirror_message(&line),
         None => Err(Error::TransportClosed),
@@ -425,6 +425,15 @@ fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<
         }
     }
 
+    run_stepping_loop(t, |action, params, prev| {
+        Ok(compute.compute(action, params, prev))
+    })
+}
+
+pub(crate) fn run_stepping_loop(
+    t: &mut Transport,
+    mut compute: impl FnMut(&str, &State, &State) -> Result<State, Error>,
+) -> Result<(), Error> {
     let mut state: State = State::new();
     let mut last_param: State = State::new();
     let mut last_action = String::new();
@@ -436,12 +445,12 @@ fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<
                 state: from_mirror,
             } => {
                 last_action = action.clone();
-                state = compute.compute(&action, &from_mirror, &State::new());
+                state = compute(&action, &from_mirror, &State::new())?;
                 t.send(&encode_report_state(&state))?;
             }
             MirrorMessage::NextStep { action, parameters } => {
                 last_action = action.clone();
-                let next = compute.compute(&action, &parameters, &state);
+                let next = compute(&action, &parameters, &state)?;
                 last_param = parameters;
                 state = next;
                 t.send(&encode_report_state(&state))?;

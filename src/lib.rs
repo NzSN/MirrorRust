@@ -1,4 +1,6 @@
 pub mod client;
+mod json;
+pub mod model_interface;
 pub mod protocol;
 pub mod registry;
 pub mod spec;
@@ -21,6 +23,17 @@ pub use client::{
     submit_validate_async, GenTracesResult, JobAccepted, JobReply, PresetClient, StateComputer,
 };
 
+pub use model_interface::{
+    make_verify_request, run_client_negotiated, run_client_negotiated_transport,
+    run_client_with_traces_negotiated, run_client_with_traces_negotiated_transport, AdapterFactory,
+    BindingError, CompiledAdapterKey, CompiledAdapterRegistration, CompiledAdapterRegistry,
+    CompiledAdapterSelection, FallibleStateComputer, GeneratedModelInterface,
+    LegacyFallbackFactory, LocalBinding, MatchedBindingContext, ModelInterfaceStatus,
+    NegotiationPolicy, SemanticDigest, MODEL_INTERFACE_CONTRACT_SCHEMA,
+    MODEL_INTERFACE_DESCRIPTOR_SCHEMA, MODEL_INTERFACE_NEGOTIATION_SCHEMA,
+    STATE_COMPUTER_CONTRACT_VERSION,
+};
+
 pub use registry::{connect_mirror_from_registry, discover_mirrors, MirrorServiceInfo};
 pub use spec::{spec_from_file, spec_from_files};
 pub use transport::{
@@ -36,6 +49,8 @@ pub enum Error {
     ProtocolError(String),
     #[error("register failed: {0}")]
     RegisterFailed(String),
+    #[error("register failed ({code}): {message}")]
+    Registration { code: String, message: String },
     #[error("step mismatch on action \"{action}\": expected {}, got {}",
             prettify_json(.expected), prettify_json(.actual))]
     StepMismatch {
@@ -57,6 +72,8 @@ pub enum Error {
     Tls(String),
     #[error("registry: {0}")]
     Registry(String),
+    #[error("model interface ({code}): {message}")]
+    ModelInterface { code: String, message: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
