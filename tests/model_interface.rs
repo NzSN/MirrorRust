@@ -1,14 +1,14 @@
 use mirrorrust::{
     make_verify_request, run_client_with_traces_negotiated_transport, spawn_mirror, ApalacheConfig,
     BindingError, CompiledAdapterKey, CompiledAdapterRegistration, CompiledAdapterRegistry,
-    CompiledAdapterSelection, Error, GeneratedModelInterface, LocalBinding, NegotiationPolicy,
-    SemanticDigest, State, STATE_COMPUTER_CONTRACT_VERSION,
+    CompiledAdapterSelection, Error, GeneratedModelInterface, LocalBinding, NegotiatedError,
+    NegotiationPolicy, SemanticDigest, State, STATE_COMPUTER_CONTRACT_VERSION,
 };
 use std::cell::RefCell;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const DIGEST: &str = "193d6cc187d05c18f02ad483a44f8ad0c1634b02083df241df08b9281b045d1c";
@@ -42,7 +42,7 @@ fn first_reply(digest: &str) -> String {
 fn run_reply(
     first: String,
     configure: impl FnOnce(&mut CompiledAdapterSelection<'_>),
-) -> (Result<(), Error>, Rc<RefCell<Calls>>) {
+) -> (Result<(), NegotiatedError>, Rc<RefCell<Calls>>) {
     let (_directory, path) = mirror_script(&[first]);
     let calls = Rc::new(RefCell::new(Calls::default()));
     let mut registry = registry(calls.clone(), false, false);
@@ -79,7 +79,7 @@ fn mirror_script(lines: &[String]) -> (tempfile::TempDir, PathBuf) {
     (directory, path)
 }
 
-fn spawn_fixture(path: &PathBuf) -> mirrorrust::Transport {
+fn spawn_fixture(path: &Path) -> mirrorrust::Transport {
     for attempt in 0..10 {
         match spawn_mirror(path.to_str().unwrap()) {
             Ok(transport) => return transport,
@@ -98,6 +98,81 @@ struct Calls {
     computer: usize,
     config: usize,
     dispose: usize,
+}
+
+#[test]
+fn compiled_verify_rejects_descriptor_statuses_before_any_callback() {
+    for policy in [NegotiationPolicy::Require, NegotiationPolicy::Prefer] {
+        for status in ["too_large", "resolved", "not_modified"] {
+            for digest in [DIGEST.to_string(), "b".repeat(64)] {
+                let reply = serde_json::json!({
+                    "proto_step": "spec_validated", "result": "valid",
+                    "modelInterface": {
+                        "schema": mirrorrust::MODEL_INTERFACE_NEGOTIATION_SCHEMA,
+                        "status": status,
+                        "descriptorSchema": mirrorrust::MODEL_INTERFACE_DESCRIPTOR_SCHEMA,
+                        "semanticDigest": format!("sha256:{digest}"),
+                        "descriptorBytes": 32769,
+                    }
+                })
+                .to_string();
+                let (result, calls) = run_reply(reply, |selection| {
+                    selection.policy = policy;
+                    selection.fallback_factory = Some(Box::new(|_| {
+                        panic!("mode-inappropriate reply must not run fallback")
+                    }));
+                });
+                assert!(
+                    matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. })
+                    if code == "negotiation_status_unexpected")
+                );
+                let calls = calls.borrow();
+                assert_eq!(
+                    (calls.factory, calls.config, calls.computer, calls.dispose),
+                    (0, 0, 0, 0)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn verify_failures_reject_descriptor_status_and_payload() {
+    for policy in [NegotiationPolicy::Require, NegotiationPolicy::Prefer] {
+        for status in [
+            "too_large",
+            "resolved",
+            "not_modified",
+            "mismatch",
+            "unsupported",
+            "unavailable",
+        ] {
+            let reply = serde_json::json!({
+                "proto_step": "register_error", "error": "rejected",
+                "modelInterface": {
+                    "schema": mirrorrust::MODEL_INTERFACE_NEGOTIATION_SCHEMA,
+                    "status": status, "code": "fixture_failure",
+                    "expectedSemanticDigest": format!("sha256:{DIGEST}"),
+                    "descriptorBytes": 32769,
+                }
+            })
+            .to_string();
+            let (result, calls) = run_reply(reply, |selection| {
+                selection.policy = policy;
+                selection.fallback_factory =
+                    Some(Box::new(|_| panic!("failure must not run fallback")));
+            });
+            assert!(
+                matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. })
+                if code == "negotiation_status_unexpected")
+            );
+            let calls = calls.borrow();
+            assert_eq!(
+                (calls.factory, calls.config, calls.computer, calls.dispose),
+                (0, 0, 0, 0)
+            );
+        }
+    }
 }
 
 fn selection<'a>(registry: &'a mut CompiledAdapterRegistry) -> CompiledAdapterSelection<'a> {
@@ -346,7 +421,7 @@ fn prefer_fallback_validates_status_fields_before_factory() {
         selection.fallback_factory = Some(Box::new(|_| panic!("fallback must not run")));
     });
     assert!(
-        matches!(result, Err(Error::ModelInterface { ref code, .. }) if code == "negotiation_status_unexpected")
+        matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. }) if code == "negotiation_status_unexpected")
     );
     assert_eq!(calls.borrow().factory, 0);
 }
@@ -378,7 +453,7 @@ fn structured_authorization_denial_is_registration_error_with_zero_callbacks() {
     let (result, calls) = run_reply(reply, |_| {});
     assert!(matches!(
         result,
-        Err(Error::Registration { ref code, ref message })
+        Err(NegotiatedError::Registration { ref code, ref message })
             if code == "authorization_denied" && message == "adapter is not authorized"
     ));
     let calls = calls.borrow();
@@ -457,7 +532,7 @@ fn callback_panic_remains_primary_and_disposal_is_attempted_once() {
         &mut selection,
     );
     assert!(
-        matches!(result, Err(Error::ModelInterface { ref code, .. }) if code == "adapter_failure")
+        matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. }) if code == "adapter_failure")
     );
     let calls = calls.borrow();
     assert_eq!((calls.factory, calls.computer, calls.dispose), (1, 1, 1));
@@ -489,7 +564,7 @@ fn exact_registry_rejects_duplicate_and_unregistered_keys_without_factories() {
         &mut duplicate_selection,
     );
     assert!(
-        matches!(result, Err(Error::ModelInterface { ref code, .. }) if code == "adapter_ambiguous")
+        matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. }) if code == "adapter_ambiguous")
     );
     assert_eq!(duplicate_calls.borrow().factory, 0);
 
@@ -505,7 +580,7 @@ fn exact_registry_rejects_duplicate_and_unregistered_keys_without_factories() {
         &mut missing,
     );
     assert!(
-        matches!(result, Err(Error::ModelInterface { ref code, .. }) if code == "adapter_not_registered")
+        matches!(result, Err(NegotiatedError::ModelInterface { ref code, .. }) if code == "adapter_not_registered")
     );
     assert_eq!(calls.borrow().factory, 0);
 }
@@ -570,7 +645,7 @@ fn binding_validation_and_cleanup_keep_exact_lifetime_and_precedence() {
             &mut selection,
         );
         assert!(
-            matches!(result, Err(Error::ModelInterface { code: ref actual, .. }) if actual == code),
+            matches!(result, Err(NegotiatedError::ModelInterface { code: ref actual, .. }) if actual == code),
             "{result:?}"
         );
         let calls = calls.borrow();
@@ -588,12 +663,17 @@ fn prefer_requires_an_explicit_fresh_fallback_factory() {
         selection.policy = NegotiationPolicy::Prefer;
     });
     assert!(
-        matches!(missing, Err(Error::ModelInterface { ref code, .. }) if code == "legacy_fallback_unavailable")
+        matches!(missing, Err(NegotiatedError::ModelInterface { ref code, .. }) if code == "legacy_fallback_unavailable")
     );
     assert_eq!(calls.borrow().factory, 0);
 
-    let lines = vec![
+    for first in [
         legacy_reply,
+        serde_json::json!({"proto_step": "spec_validated", "result": "valid", "modelInterface": {"schema": mirrorrust::MODEL_INTERFACE_NEGOTIATION_SCHEMA, "status": "unsupported"}}).to_string(),
+        serde_json::json!({"proto_step": "spec_validated", "result": "valid", "modelInterface": {"schema": mirrorrust::MODEL_INTERFACE_NEGOTIATION_SCHEMA, "status": "unavailable"}}).to_string(),
+    ] {
+    let lines = vec![
+        first,
         r#"{"proto_step":"initial_state","action":"init","state":{}}"#.into(),
         r#"{"proto_step":"step_ok"}"#.into(),
         r#"{"proto_step":"all_steps_done"}"#.into(),
@@ -638,4 +718,5 @@ fn prefer_requires_an_explicit_fresh_fallback_factory() {
         (calls.factory, calls.config, calls.computer, calls.dispose),
         (1, 1, 1, 1)
     );
+    }
 }

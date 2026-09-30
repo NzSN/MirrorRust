@@ -292,25 +292,25 @@ fn free_port() -> u16 {
 }
 
 fn registry_once(body: String) -> (String, std::thread::JoinHandle<()>) {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufReader, Read, Write};
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let handle = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(socket.try_clone().unwrap());
-        let mut request_line = String::new();
-        reader.read_line(&mut request_line).unwrap();
-        assert_eq!(
-            request_line,
-            "GET /v1/health/service/modelmirrors HTTP/1.1\r\n"
-        );
-        loop {
-            let mut header = String::new();
-            reader.read_line(&mut header).unwrap();
-            if header == "\r\n" || header.is_empty() {
+        let mut request = Vec::new();
+        for byte in BufReader::new(&mut socket).take(4096).bytes() {
+            request.push(byte.unwrap());
+            if request.ends_with(b"\r\n\r\n") {
                 break;
             }
         }
+        assert!(
+            request.ends_with(b"\r\n\r\n"),
+            "incomplete or oversized HTTP headers"
+        );
+        assert!(String::from_utf8(request)
+            .unwrap()
+            .starts_with("GET /v1/health/service/modelmirrors HTTP/1.1\r\n"));
         write!(
             socket,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -318,6 +318,7 @@ fn registry_once(body: String) -> (String, std::thread::JoinHandle<()>) {
             body
         )
         .unwrap();
+        socket.flush().unwrap();
     });
     (format!("http://127.0.0.1:{port}"), handle)
 }
@@ -684,6 +685,43 @@ fn counter_replays_over_real_tcp_and_mtls_server_modes() {
             .expect("explicit pin override");
     registry_server.join().unwrap();
     overridden.close().unwrap();
+
+    // A configured operator pin is retained with missing or conflicting metadata.
+    let unpinned_service =
+        format!(r#"{{"Service":{{"ID":"no-metadata","Address":"127.0.0.1","Port":{port}}}}}"#);
+    for candidate in [unpinned_service.clone(), service("metadata", &fingerprint)] {
+        let (registry, server) = registry_once(format!("[{candidate}]"));
+        let error = connect_mirror_from_registry(&registry, &wrong_pin, None)
+            .err()
+            .unwrap();
+        server.join().unwrap();
+        assert!(error.to_string().contains("fingerprint mismatch"));
+    }
+    for candidate in [unpinned_service, service("stale-metadata", &"0".repeat(64))] {
+        let (registry, server) = registry_once(format!("[{candidate}]"));
+        let mut connection = connect_mirror_from_registry(&registry, &pinned, None)
+            .expect("configured pin must override discovery metadata");
+        server.join().unwrap();
+        connection.close().unwrap();
+    }
+    let (registry, server) = registry_once(format!(
+        "[{}]",
+        service("override-configured", &"0".repeat(64))
+    ));
+    let mut connection = connect_mirror_from_registry(&registry, &wrong_pin, Some(&fingerprint))
+        .expect("explicit override must take precedence over configured and discovered pins");
+    server.join().unwrap();
+    connection.close().unwrap();
+
+    let mut invalid_pin = pki.client_options();
+    invalid_pin.pin = Some("invalid".into());
+    let (registry, server) =
+        registry_once(format!("[{}]", service("valid-metadata", &fingerprint)));
+    let error = connect_mirror_from_registry(&registry, &invalid_pin, None)
+        .err()
+        .unwrap();
+    server.join().unwrap();
+    assert!(error.to_string().contains("certificate pin must be"));
 
     assert_counter_mismatch(connect_retry(port, &pinned), inline_spec);
 }

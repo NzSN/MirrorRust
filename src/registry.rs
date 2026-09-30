@@ -113,8 +113,8 @@ pub fn discover_mirrors(registry_url: &str) -> Vec<MirrorServiceInfo> {
 }
 
 /// Discover registry candidates and connect to the first usable mTLS peer.
-/// A caller-supplied pin overrides per-entry metadata; otherwise each
-/// candidate's `cert-sha256` value is enforced when present.
+/// Pin precedence is explicit override, configured TLS pin, then candidate
+/// `cert-sha256`. Discovery never clears an operator-configured pin.
 pub fn connect_mirror_from_registry(
     registry_url: &str,
     tls: &TlsOptions,
@@ -129,6 +129,7 @@ pub fn connect_mirror_from_registry(
         let mut options = tls.clone();
         options.pin = pin_override
             .map(str::to_string)
+            .or_else(|| tls.pin.clone())
             .or_else(|| candidate.cert_sha256.clone());
         match connect_tls_mirror(&candidate.host, candidate.port, &options) {
             Ok(transport) => return Ok(transport),

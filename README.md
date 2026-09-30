@@ -100,8 +100,10 @@ run_client_with_transport(tls, config, traces, counter, Some(spec))?;
 `TlsOptions` supports an optional SAN verification name, handshake timeout,
 and case-insensitive SHA-256 leaf-certificate pin. IP literals are checked
 against IP SAN and are not sent as SNI. Subject-CN fallback is disabled by
-rustls/webpki, TLS is restricted to 1.3, and client keys must not be readable
-by group or other users on POSIX.
+rustls/webpki, TLS is restricted to 1.3, and client keys must have exactly `0600`
+permissions on POSIX, including no special-mode bits. For registry connections,
+pin precedence is `pin_override`, then `TlsOptions.pin`, then candidate
+`cert-sha256`. Discovery never clears an operator-configured pin.
 
 ## API
 
@@ -176,16 +178,27 @@ reply job ID. Send, read, decode, correlation and protocol failures close the
 connection while retaining the primary error. A registration rejection such as
 queue pressure leaves a valid connection usable. Mutable transport borrowing
 serializes exchanges; backend jobs submitted before awaiting can run concurrently.
-Compiled model-interface negotiation is available for reviewed metadata and
-exact local adapter registrations. MirrorRust does not claim a compiler-emitted
-`mirrorrust-v1` target; the Counter target in MirrorGate is a fixture-only
+Compiled model-interface negotiation uses compiler-produced metadata and exact
+local adapter registrations. Mirrors implements the `mirrorrust-v1` generated
+binding target; the Counter target in MirrorGate is a separate fixture-only
 `mirrorrust-counter-fixture-v1` acceptance binding. The optional Gate facade
 lives in `../MirrorGate/integrations/mirrorrust` and is not a MirrorRust runtime
 dependency.
 
-This source update adds the public `Error::ModelInterface` and
-`Error::Registration` variants. Callers that exhaustively match `Error` must add
-arms for local admission failures and structured server registration failures,
-respectively. Existing runner signatures and wire encodings are retained, but
-the enum addition is a Rust source-compatibility migration for exhaustive
-matches. Package publication and versioning are handled separately.
+Legacy runners retain their original exhaustive `Error` enum, signatures, and
+wire encodings. Negotiated runners and admission helpers return the separate,
+non-exhaustive `NegotiatedError`. Its `ModelInterface` variant carries local
+admission codes, `Registration` preserves structured server codes, and
+`Legacy(Error)` preserves transport/protocol/replay failures, including ordinary
+`Error::StepMismatch`.
+
+Consumers of the former negotiated `Result<_, Error>` API must migrate to
+`Result<_, NegotiatedError>` and match ordinary failures through `Legacy`.
+Match `NegotiatedError` with a catch-all arm for future variants. Existing
+non-negotiated callers need no changes. The coordinated Gate integration uses
+this new type; package publication and versioning are handled separately.
+
+Compiled verify mode accepts only an exact `matched` admission. Explicit `prefer`
+may use its separate fallback factory for an old-server omission or a valid
+`unsupported`/`unavailable` reply. Descriptor-only statuses, including `too_large`,
+are protocol failures for this request mode and never authorize fallback.

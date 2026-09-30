@@ -1,0 +1,137 @@
+{
+  "schema": "mirrorrust.client-guide-fix-evidence/v1",
+  "date": "2026-10-01",
+  "status": "local-profile-acceptance-passed",
+  "scope": "Client-guide fixes and coordinated negotiated error migration; no release or aggregate-cgroup qualification",
+  "repositories": {
+    "MirrorRust": {
+      "head": "cf0e6297f0973696d0900f5ffb598c9d4dd10ff7",
+      "sourceSha256": {
+        "Cargo.toml": "dc7529ce6edbdc1096ff935b90be2ce4ff667dd5aac4edd90f3db3a82d25a01a",
+        "Cargo.lock": "9b00e2e1be5928f6f45b7b6a877deee23aca627724c017415182489ca2396c8f",
+        "README.md": "1f8be40eeb84a9a01276d0128a5e432f0145e9333906e709cf9a820271dbadb9",
+        "src/client.rs": "c038f8eeae439e501e72f8966c31c97e76cfe5edf494d4cb536dc1948e542f87",
+        "src/json.rs": "ef20283713e020529d022fc67f8b92eef8027912f58fa78e04a897c16d739c19",
+        "src/lib.rs": "bf4bc9e52b18b931317b0c790a225a8ffdd0d3526eff240870f8205cb9576fad",
+        "src/model_interface.rs": "3d6ada4b8526fa6aa7d0ce5f2d824498160285d110b6cf53dbe77d9cd1174c6d",
+        "src/protocol.rs": "ed59ec6bc4949d4864db2a434fd4f218e4e1c1511cb38dc6cb3286c15b8226ca",
+        "src/registry.rs": "97458ada08ffd4e00392d6c630ea353bce83969048ec58da4a678e646ef0b0cf",
+        "src/spec.rs": "6a13de7cfa6fbdb7c3a572b7479b94efd1902b9514cccb192687b058cc72cd4f",
+        "src/transport.rs": "2be4e2a61c69bde3f9dc6bb29009ae652b51cbbcc2baee559f066ecc5fcdcedd",
+        "tests/async.rs": "e2ea17017ee82b3eec701479fd0cf1140dccd4d5302309b1d8004b8045116d25",
+        "tests/golden.rs": "c3d918d8efc9798fffdd897eb221a464918cf1c06a67dced6ba3652bbd9259e6",
+        "tests/legacy_compatibility.rs": "a38969449633361793f6050a93cc4244f932a01e6fd649f946477d081a275dde",
+        "tests/model_interface.rs": "963adca242667d891a6e126b371e2e2113e33b83c5a5671b9cf4b965c404aef1",
+        "tests/protocol.rs": "9d416a5d19b1fccb1e535e6f27a87e8f1b37318c9799a46b27aa39b112107437",
+        "tests/registry.rs": "7e91d63b89942272b813d4a9795073ae1a6e2f830a483471d1368939cb274968",
+        "tests/server_mode_smoke.rs": "74ac6ad2c9077b254049cae25c3ead70fefcb0c830056a734fc1ff68b4271516",
+        "tests/smoke.rs": "87e76461c984200fab8d93fba601aee787b6fb9606935f8a716f3311510d5a44",
+        "tests/spec.rs": "6f6e70f8d82623ad74f6b0217aa4d47622eb026570d88a92281b058665601802",
+        "tests/transport.rs": "85b6d088cfd997d40ee4a29fbbf1970a7216d22922606fb79257d17f9ba49324"
+      }
+    },
+    "Mirrors": {
+      "head": "772a82c3796f241439f610b9e65ab88049f57853",
+      "sourceSha256": {
+        "Docs/client-implementation-guide.md": "c5560149add42cd3acbdebbf5e4764bd2a3c0c782298d6d0ea11847e8a146e4a",
+        "Docs/model-interface-runtime-distribution-design.md": "04ea8dbf6835e61bc9e53f0f3d931715842e38b163635fc95baf2fabe5c56e2a",
+        "tools/model-interface-rust/tests.rs": "fb319de1fa45a06ca32f931248074d4376fbb91d0b725067ea66f0735413039c",
+        "test/fixtures/model-interface/counter/generated-rust/CounterMirror.generated.rs": "cd0b7cd4c0ef4507f025b56944dbb03d602f747a564e313f324557834294c400",
+        "test/fixtures/model-interface/counter/Counter.mirror-interface.lock.json": "fb27b8c5cf0ff5f5ceedc8f60a46260d10e92bb2af15e5ed0a1492338f2d6740"
+      }
+    },
+    "MirrorGate": {
+      "head": "0fa8a311018db9cbfdf2bb516235c1ec09e1ddbd",
+      "sourceSha256": {
+        "integrations/mirrorrust/Cargo.toml": "d5813926299c4eef6836cb4e1442f616b004b62b59104b45d60eb89db58ed17b",
+        "integrations/mirrorrust/Cargo.lock": "56d8ff748022256d6bd0d905b3ca33a7a07cf29ead3ce2225d5a5b7e6b916e06",
+        "integrations/mirrorrust/src/lib.rs": "b0b04897a768b34c0260473293bbd86d35ce731dffc9517dee96b5ffb81184c9",
+        "integrations/mirrorrust/src/main.rs": "af66d4d447273d96f6bd7f86c25c46e6ac924b7a1ba0c0968306aa5d9bbaa4cb"
+      }
+    }
+  },
+  "binaries": {
+    "/home/nzsn/Repos/Mirrors/.lake/build/bin/mirror": "185a49d6278d0d2fdc424180db34d0dcaf44b6eabadbc1e4ce23013b44ba9ecc",
+    "/home/nzsn/Repos/Mirrors/.lake/build/bin/model_interface_gen": "55bf151eae973a0c83f2827f38ee4dafa5558fb12770b15b3d3837bdafcc2257"
+  },
+  "checks": {
+    "mirrorrust": {
+      "passed": 70,
+      "failed": 0,
+      "ignored": 0,
+      "liveSmokeTests": 3
+    },
+    "generatedRustHarness": {
+      "passed": 7,
+      "failed": 0
+    },
+    "generatedFreshness": "model-interface check clean",
+    "modelInterfaceSpec": "MODEL INTERFACE SPEC GREEN",
+    "legacyErrorEnum": "exact match against 328e4e6^; exhaustive consumer compiles and replays without extension",
+    "gateIntegration": {
+      "passed": 2,
+      "failed": 0,
+      "clippy": "passed"
+    },
+    "gateRegression": {
+      "exitCode": 0,
+      "pythonPassed": 293,
+      "pythonSkipped": 3,
+      "nodePassed": 227,
+      "nodeIntegrationPassed": 4,
+      "cppCTestPassed": 3,
+      "rustSdkPassedPerFeatureMode": 32,
+      "rustWorkerPassed": 15,
+      "lifecycleCasesPerRuntime": 6
+    },
+    "gateRustMatrix": {
+      "rows": 20,
+      "exitCode": 0,
+      "wrongDigestRows": 4,
+      "allCleanupConfirmed": true,
+      "nodeSentinel": "untouched",
+      "privateCanary": "passed"
+    },
+    "formatting": "passed",
+    "clippyAllTargets": "passed"
+  },
+  "limits": [
+    "Three aggregate-cgroup acceptance tests skipped: no operator-delegated parent configured.",
+    "Historical release/installed-framework qualification is not renewed by these local tests.",
+    "MirrorGate Counter remains handwritten fixture code; generated Rust harness is separate."
+  ],
+  "retainedFiles": {
+    "gate-rust-matrix.jsonl": {
+      "bytes": 10336,
+      "sha256": "254336e6bc28c778c8253d47975cbce1a1bd73be766c97eb1099f86293fbbc80"
+    },
+    "gate-rust-matrix.manifest.json": {
+      "bytes": 2699,
+      "sha256": "3ce807606e199aa3dd06419af4ab2796f3dba1f1791d980cd035b19f086ef08c"
+    },
+    "mirrorrust-tests.log.gz": {
+      "bytes": 2402,
+      "sha256": "9d471cfc3232f605168c93467d88f29c18eea8df3ce1e50ea168c2e88e8abc5d",
+      "compression": "gzip",
+      "originalName": "mirrorrust-tests.log",
+      "originalBytes": 7344,
+      "originalSha256": "7a305bfe2cf4c7335240d290d79f52f4cd05c03a80b157388638bc38447ddcb1"
+    },
+    "gate-regression.log.gz": {
+      "bytes": 14901,
+      "sha256": "f939e3d08e1fc42eb57a881e3085e18755600d04dd1b66ebb2ca0695688ba759",
+      "compression": "gzip",
+      "originalName": "gate-regression.log",
+      "originalBytes": 76002,
+      "originalSha256": "936ef99103bbb01cca769aaa2b665b18d6ede2a96419df1502ede96b2ed87e67"
+    },
+    "gate-rust-matrix.log.gz": {
+      "bytes": 2108,
+      "sha256": "01ea262ca9594ba40239675d5f82814350def0593ab93b8244c20df89f684334",
+      "compression": "gzip",
+      "originalName": "gate-rust-matrix.log",
+      "originalBytes": 7591,
+      "originalSha256": "855a46e9fb4ccd8c3ed31d868d08da80258521868fd49828ad96619560c83d49"
+    }
+  }
+}

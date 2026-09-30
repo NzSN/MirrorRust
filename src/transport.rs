@@ -329,10 +329,11 @@ fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
 fn assert_private_key_mode(path: &Path) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
     let mode = std::fs::metadata(path)?.permissions().mode();
-    if mode & 0o077 != 0 {
+    if mode & 0o7777 != 0o600 {
         return Err(Error::InvalidArgument(format!(
-            "client key {} is accessible by group/other; chmod 0600 is required",
-            path.display()
+            "client key {} has mode {:04o}; chmod 0600 is required",
+            path.display(),
+            mode & 0o7777
         )));
     }
     Ok(())

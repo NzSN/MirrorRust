@@ -1,5 +1,5 @@
 use mirrorrust::{connect_mirror_from_registry, discover_mirrors, Error, TlsOptions};
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
@@ -10,15 +10,25 @@ fn registry_stub(status: &str, body: &str) -> (String, thread::JoinHandle<String
     let status = status.to_string();
     let handle = thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
-        let mut request = [0_u8; 4096];
-        let read = socket.read(&mut request).unwrap();
-        let request = String::from_utf8(request[..read].to_vec()).unwrap();
+        let mut request = Vec::new();
+        for byte in BufReader::new(&mut socket).take(4096).bytes() {
+            request.push(byte.unwrap());
+            if request.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+        assert!(
+            request.ends_with(b"\r\n\r\n"),
+            "incomplete or oversized HTTP headers"
+        );
+        let request = String::from_utf8(request).unwrap();
         write!(
             socket,
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
         .unwrap();
+        socket.flush().unwrap();
         request
     });
     (format!("http://127.0.0.1:{port}/consul"), handle)

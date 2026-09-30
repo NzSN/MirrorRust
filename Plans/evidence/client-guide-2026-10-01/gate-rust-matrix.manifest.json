@@ -1,0 +1,57 @@
+{
+  "schema": "mirrors.shared-orchestration-reproducibility/v1",
+  "summary": {
+    "schema": "mirrorgate.rust-control-acceptance-summary/v1",
+    "status": "green",
+    "rows": 20,
+    "backend": "linux-bubblewrap-v1"
+  },
+  "repositories": {
+    "MirrorGate": {
+      "head": "0fa8a311018db9cbfdf2bb516235c1ec09e1ddbd",
+      "workspaceSha256": "20c09ea4ae07159171594edf0aac5b4da3938083464a1c06c1ea577593cc7060",
+      "statusPorcelainV1Z": " M docs/rust-evaluator-sdk-status.md\u0000 M integrations/mirrorrust/README.md\u0000 M integrations/mirrorrust/src/lib.rs\u0000 M integrations/mirrorrust/src/main.rs\u0000?? .projectile-cache.eld\u0000"
+    },
+    "MirrorRust": {
+      "head": "cf0e6297f0973696d0900f5ffb598c9d4dd10ff7",
+      "workspaceSha256": "202aadf6b09fc7a2ce81f1274b42cb05091c307e022e970773d7d454bab216e9",
+      "statusPorcelainV1Z": " M README.md\u0000 M src/client.rs\u0000 M src/lib.rs\u0000 M src/model_interface.rs\u0000 M src/registry.rs\u0000 M src/transport.rs\u0000 M tests/model_interface.rs\u0000 M tests/registry.rs\u0000 M tests/server_mode_smoke.rs\u0000 M tests/transport.rs\u0000?? Plans/\u0000?? tests/legacy_compatibility.rs\u0000"
+    },
+    "Mirrors": {
+      "head": "772a82c3796f241439f610b9e65ab88049f57853",
+      "workspaceSha256": "2e8cbcd70e2664c7d144cfb5878dc38ca5d039657d6bc51cf0b55bc719b47722",
+      "statusPorcelainV1Z": " M Docs/client-implementation-guide.md\u0000 M tools/model-interface-rust/tests.rs\u0000?? .projectile-cache.eld\u0000"
+    }
+  },
+  "toolchain": {
+    "python": "Python 3.12.3",
+    "rust": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "nodeWorkerRuntime": "v24.15.0",
+    "apalache": "0.61.0",
+    "bubblewrap": "bubblewrap 0.9.0",
+    "kernel": "Linux 6.6.114.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025 x86_64 GNU/Linux"
+  },
+  "artifacts": {
+    "driverSha256": "241da47b31bc7f879576111be836d55a090d87d4920230e7a1ea9600aa322bee",
+    "rustWorkerSha256": "bbcb248bb481c489ea96d12e9a120c72e87ae9c6ee17950949a29a0fed1d0eb2",
+    "mirrorsBinarySha256": "185a49d6278d0d2fdc424180db34d0dcaf44b6eabadbc1e4ce23013b44ba9ecc",
+    "nodeWorkerBinarySha256": "d1de76d8edf2fededf6f8b30d244e2c0529ac607923a018283b77e9c74bd932c"
+  },
+  "claims": {
+    "gatePlatform": "linux",
+    "gateBackend": "linux-bubblewrap-v1",
+    "nodeEvaluatorRequired": false,
+    "productionPublication": false,
+    "privateCanaryChecks": {
+      "workerVisibleSurfaces": [
+        "adapter-inputs",
+        "worker-environment",
+        "proc-self",
+        "frozen-artifact"
+      ],
+      "publicEvaluatorEvidence": true,
+      "rawWorkerFrameCapture": false
+    }
+  }
+}

@@ -430,10 +430,10 @@ fn run_main_loop(t: &mut Transport, compute: &mut impl StateComputer) -> Result<
     })
 }
 
-pub(crate) fn run_stepping_loop(
+pub(crate) fn run_stepping_loop<E: From<Error>>(
     t: &mut Transport,
-    mut compute: impl FnMut(&str, &State, &State) -> Result<State, Error>,
-) -> Result<(), Error> {
+    mut compute: impl FnMut(&str, &State, &State) -> Result<State, E>,
+) -> Result<(), E> {
     let mut state: State = State::new();
     let mut last_param: State = State::new();
     let mut last_action = String::new();
@@ -469,14 +469,19 @@ pub(crate) fn run_stepping_loop(
                     expected,
                     actual,
                     hints,
-                })
+                }
+                .into())
             }
-            MirrorMessage::ProtocolError { error } => return Err(Error::ProtocolError(error)),
-            MirrorMessage::RegisterError { error } => return Err(Error::RegisterFailed(error)),
+            MirrorMessage::ProtocolError { error } => {
+                return Err(Error::ProtocolError(error).into())
+            }
+            MirrorMessage::RegisterError { error } => {
+                return Err(Error::RegisterFailed(error).into())
+            }
             other => {
-                return Err(Error::UnexpectedMessage(format!(
-                    "unexpected message: {other:?}"
-                )))
+                return Err(
+                    Error::UnexpectedMessage(format!("unexpected message: {other:?}")).into(),
+                )
             }
         }
     }

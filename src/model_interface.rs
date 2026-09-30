@@ -7,7 +7,7 @@
 use crate::client::run_stepping_loop;
 use crate::protocol::{ApalacheConfig, ApalacheSpec, ClientMessage, State, TraceGenerationConfig};
 use crate::transport::{spawn_mirror, Transport, MAX_PROTOCOL_LINE_BYTES};
-use crate::{encode_client_message, Error};
+use crate::{encode_client_message, Error as LegacyError, NegotiatedError};
 use serde::de::{DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value as Json};
 use std::collections::HashSet;
@@ -19,8 +19,8 @@ pub const MODEL_INTERFACE_NEGOTIATION_SCHEMA: &str = "mirrors.model-interface-ne
 pub const MODEL_INTERFACE_DESCRIPTOR_SCHEMA: &str = "mirrors.model-interface-descriptor/v1";
 pub const STATE_COMPUTER_CONTRACT_VERSION: &str = "mirrors.state-computer/v1";
 
-fn mi_error(code: impl Into<String>, message: impl Into<String>) -> Error {
-    Error::ModelInterface {
+fn mi_error(code: impl Into<String>, message: impl Into<String>) -> NegotiatedError {
+    NegotiatedError::ModelInterface {
         code: code.into(),
         message: message.into(),
     }
@@ -76,7 +76,7 @@ where
 pub struct SemanticDigest([u8; 32]);
 
 impl SemanticDigest {
-    pub fn from_hex(value: &str) -> Result<Self, Error> {
+    pub fn from_hex(value: &str) -> Result<Self, NegotiatedError> {
         if value.len() != 64
             || !value
                 .bytes()
@@ -101,7 +101,7 @@ impl SemanticDigest {
         Ok(Self(bytes))
     }
 
-    pub fn parse_wire(value: &str) -> Result<Self, Error> {
+    pub fn parse_wire(value: &str) -> Result<Self, NegotiatedError> {
         Self::from_hex(value.strip_prefix("sha256:").ok_or_else(|| {
             mi_error(
                 "descriptor_digest_invalid",
@@ -211,7 +211,7 @@ impl CompiledAdapterRegistry {
         Self { registrations }
     }
 
-    fn resolve_index(&self, key: &CompiledAdapterKey) -> Result<usize, Error> {
+    fn resolve_index(&self, key: &CompiledAdapterKey) -> Result<usize, NegotiatedError> {
         let matches: Vec<_> = self
             .registrations
             .iter()
@@ -294,7 +294,7 @@ struct RawStrictParser<'a> {
 
 #[allow(dead_code)]
 impl RawStrictParser<'_> {
-    fn error(&self, message: impl Into<String>) -> Error {
+    fn error(&self, message: impl Into<String>) -> NegotiatedError {
         mi_error(
             "negotiation_status_unexpected",
             format!(
@@ -314,7 +314,7 @@ impl RawStrictParser<'_> {
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<Json, Error> {
+    fn value(&mut self, depth: usize) -> Result<Json, NegotiatedError> {
         self.skip_ws();
         self.nodes += 1;
         if self.nodes > 16_384 {
@@ -351,7 +351,7 @@ impl RawStrictParser<'_> {
         }
     }
 
-    fn string(&mut self) -> Result<String, Error> {
+    fn string(&mut self) -> Result<String, NegotiatedError> {
         let start = self.at;
         self.at += 1;
         while let Some(byte) = self.text.as_bytes().get(self.at).copied() {
@@ -369,7 +369,7 @@ impl RawStrictParser<'_> {
         Err(self.error("unterminated string"))
     }
 
-    fn number(&mut self) -> Result<Json, Error> {
+    fn number(&mut self) -> Result<Json, NegotiatedError> {
         let start = self.at;
         let bytes = self.text.as_bytes();
         if bytes.get(self.at) == Some(&b'-') {
@@ -416,7 +416,7 @@ impl RawStrictParser<'_> {
         )))
     }
 
-    fn array(&mut self, depth: usize) -> Result<Json, Error> {
+    fn array(&mut self, depth: usize) -> Result<Json, NegotiatedError> {
         self.at += 1;
         self.skip_ws();
         let mut values = Vec::new();
@@ -438,7 +438,7 @@ impl RawStrictParser<'_> {
         }
     }
 
-    fn object(&mut self, depth: usize) -> Result<Json, Error> {
+    fn object(&mut self, depth: usize) -> Result<Json, NegotiatedError> {
         self.at += 1;
         self.skip_ws();
         let mut values = Map::new();
@@ -474,7 +474,7 @@ impl RawStrictParser<'_> {
         }
     }
 
-    fn literal(&mut self, literal: &str) -> Result<(), Error> {
+    fn literal(&mut self, literal: &str) -> Result<(), NegotiatedError> {
         if self.text[self.at..].starts_with(literal) {
             self.at += literal.len();
             Ok(())
@@ -584,7 +584,7 @@ impl<'de> Visitor<'de> for StrictVisitor<'_> {
     }
 }
 
-fn strict_parse(text: &str) -> Result<Json, Error> {
+fn strict_parse(text: &str) -> Result<Json, NegotiatedError> {
     crate::json::parse(
         text,
         crate::json::Limits {
@@ -598,7 +598,7 @@ fn strict_parse(text: &str) -> Result<Json, Error> {
 }
 
 #[allow(dead_code)]
-fn validate_number_tokens(text: &str) -> Result<(), Error> {
+fn validate_number_tokens(text: &str) -> Result<(), NegotiatedError> {
     let bytes = text.as_bytes();
     let mut at = 0;
     while at < bytes.len() {
@@ -655,7 +655,7 @@ fn object<'a>(
     path: &str,
     allowed: &[&str],
     required: &[&str],
-) -> Result<&'a Map<String, Json>, Error> {
+) -> Result<&'a Map<String, Json>, NegotiatedError> {
     let map = value.as_object().ok_or_else(|| {
         mi_error(
             "negotiation_status_unexpected",
@@ -677,7 +677,7 @@ fn object<'a>(
     Ok(map)
 }
 
-fn short_string<'a>(value: &'a Json, path: &str) -> Result<&'a str, Error> {
+fn short_string<'a>(value: &'a Json, path: &str) -> Result<&'a str, NegotiatedError> {
     let text = value.as_str().ok_or_else(|| {
         mi_error(
             "negotiation_status_unexpected",
@@ -706,7 +706,7 @@ fn validate_itf_literal(
     depth: usize,
     nodes: &mut usize,
     path: &str,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     if depth >= 128 {
         return Err(mi_error(
             "negotiation_status_unexpected",
@@ -819,7 +819,7 @@ fn validate_itf_literal(
     Ok(())
 }
 
-fn validate_path(value: &Json, path: &str, nodes: &mut usize) -> Result<(), Error> {
+fn validate_path(value: &Json, path: &str, nodes: &mut usize) -> Result<(), NegotiatedError> {
     let fields = value
         .as_object()
         .filter(|value| value.len() == 1)
@@ -849,7 +849,7 @@ fn validate_model_type(
     depth: usize,
     nodes: &mut usize,
     path: &str,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     if depth >= 32 {
         return Err(mi_error(
             "negotiation_status_unexpected",
@@ -948,7 +948,7 @@ fn validate_model_type(
     Ok(())
 }
 
-fn validate_action(value: &Json, path: &str, nodes: &mut usize) -> Result<(), Error> {
+fn validate_action(value: &Json, path: &str, nodes: &mut usize) -> Result<(), NegotiatedError> {
     let action = object(
         value,
         path,
@@ -1015,7 +1015,7 @@ fn validate_action(value: &Json, path: &str, nodes: &mut usize) -> Result<(), Er
     Ok(())
 }
 
-fn validate_contract(value: &Json) -> Result<(), Error> {
+fn validate_contract(value: &Json) -> Result<(), NegotiatedError> {
     let path = "modelInterface.contract.inline";
     let contract = object(
         value,
@@ -1126,7 +1126,7 @@ fn validate_contract(value: &Json) -> Result<(), Error> {
 pub fn make_verify_request(
     metadata: &GeneratedModelInterface,
     policy: NegotiationPolicy,
-) -> Result<ModelInterfaceVerifyRequest, Error> {
+) -> Result<ModelInterfaceVerifyRequest, NegotiatedError> {
     let expected_semantic_digest = SemanticDigest::from_hex(&metadata.semantic_digest)?;
     let contract = strict_parse(&metadata.contract_json)?;
     validate_contract(&contract)?;
@@ -1151,7 +1151,7 @@ fn request_json(request: &ModelInterfaceVerifyRequest) -> Json {
 fn encode_registration(
     registration: ClientMessage,
     request: &ModelInterfaceVerifyRequest,
-) -> Result<String, Error> {
+) -> Result<String, NegotiatedError> {
     let mut outer: Json = serde_json::from_str(&encode_client_message(&registration))?;
     outer
         .as_object_mut()
@@ -1167,7 +1167,7 @@ fn encode_registration(
     Ok(encoded)
 }
 
-fn status(value: &str) -> Result<ModelInterfaceStatus, Error> {
+fn status(value: &str) -> Result<ModelInterfaceStatus, NegotiatedError> {
     match value {
         "matched" => Ok(ModelInterfaceStatus::Matched),
         "resolved" => Ok(ModelInterfaceStatus::Resolved),
@@ -1183,7 +1183,10 @@ fn status(value: &str) -> Result<ModelInterfaceStatus, Error> {
     }
 }
 
-fn optional_digest(map: &Map<String, Json>, key: &str) -> Result<Option<SemanticDigest>, Error> {
+fn optional_digest(
+    map: &Map<String, Json>,
+    key: &str,
+) -> Result<Option<SemanticDigest>, NegotiatedError> {
     match map.get(key) {
         None | Some(Json::Null) => Ok(None),
         Some(Json::String(value)) => Ok(Some(SemanticDigest::parse_wire(value)?)),
@@ -1197,14 +1200,17 @@ fn optional_digest(map: &Map<String, Json>, key: &str) -> Result<Option<Semantic
 fn optional_short_string<'a>(
     map: &'a Map<String, Json>,
     key: &str,
-) -> Result<Option<&'a str>, Error> {
+) -> Result<Option<&'a str>, NegotiatedError> {
     match map.get(key) {
         None | Some(Json::Null) => Ok(None),
         Some(value) => short_string(value, &format!("modelInterface.{key}")).map(Some),
     }
 }
 
-fn optional_nonnegative_integer(map: &Map<String, Json>, key: &str) -> Result<bool, Error> {
+fn optional_nonnegative_integer(
+    map: &Map<String, Json>,
+    key: &str,
+) -> Result<bool, NegotiatedError> {
     match map.get(key) {
         None | Some(Json::Null) => Ok(false),
         Some(Json::Number(value))
@@ -1235,7 +1241,7 @@ enum RegistrationReply {
     Other(String),
 }
 
-fn registration_reply(outer: &Map<String, Json>) -> Result<RegistrationReply, Error> {
+fn registration_reply(outer: &Map<String, Json>) -> Result<RegistrationReply, NegotiatedError> {
     let step = outer
         .get("proto_step")
         .and_then(Json::as_str)
@@ -1285,7 +1291,7 @@ fn decode_authorization(
     line: &str,
     request: &ModelInterfaceVerifyRequest,
     fallback: bool,
-) -> Result<Authorization, Error> {
+) -> Result<Authorization, NegotiatedError> {
     let raw = strict_parse(line)?;
     let outer = raw.as_object().ok_or_else(|| {
         mi_error(
@@ -1297,7 +1303,7 @@ fn decode_authorization(
     let extension = outer.get("modelInterface").filter(|value| !value.is_null());
     match message {
         RegistrationReply::RegisterError(error) => {
-            let extension = extension.ok_or_else(|| Error::RegisterFailed(error.clone()))?;
+            let extension = extension.ok_or_else(|| LegacyError::RegisterFailed(error.clone()))?;
             let failure = object(
                 extension,
                 "modelInterface",
@@ -1325,7 +1331,6 @@ fn decode_authorization(
                 ModelInterfaceStatus::Mismatch
                     | ModelInterfaceStatus::Unsupported
                     | ModelInterfaceStatus::Unavailable
-                    | ModelInterfaceStatus::TooLarge
             ) {
                 return Err(mi_error(
                     "negotiation_status_unexpected",
@@ -1355,18 +1360,18 @@ fn decode_authorization(
                     "mismatch failure lacks expectedSemanticDigest",
                 ));
             }
-            if failure_status == ModelInterfaceStatus::TooLarge && !has_descriptor_bytes {
+            if has_descriptor_bytes {
                 return Err(mi_error(
                     "negotiation_status_unexpected",
-                    "too_large failure lacks descriptorBytes",
+                    "descriptorBytes is forbidden on a verify registration failure",
                 ));
             }
-            Err(Error::Registration {
+            Err(NegotiatedError::Registration {
                 code: code.to_owned(),
                 message: error,
             })
         }
-        RegistrationReply::SpecInvalid(detail) => Err(Error::SpecInvalid(detail)),
+        RegistrationReply::SpecInvalid(detail) => Err(LegacyError::SpecInvalid(detail).into()),
         RegistrationReply::SpecValid => {
             let Some(extension) = extension else {
                 return if request.policy == NegotiationPolicy::Prefer && fallback {
@@ -1459,26 +1464,10 @@ fn decode_authorization(
                         ))
                     }
                 }
-                ModelInterfaceStatus::TooLarge => {
-                    if descriptor_schema != Some(MODEL_INTERFACE_DESCRIPTOR_SCHEMA)
-                        || semantic_digest.is_none()
-                        || has_descriptor
-                        || !has_descriptor_bytes
-                    {
-                        return Err(mi_error(
-                            "negotiation_status_unexpected",
-                            "invalid too_large model-interface reply",
-                        ));
-                    }
-                    if request.policy == NegotiationPolicy::Prefer && fallback {
-                        Ok(Authorization::Fallback)
-                    } else {
-                        Err(mi_error(
-                            "negotiation_status_unexpected",
-                            "model-interface fallback status is not permitted",
-                        ))
-                    }
-                }
+                ModelInterfaceStatus::TooLarge => Err(mi_error(
+                    "negotiation_status_unexpected",
+                    "too_large is invalid for compiled verification",
+                )),
                 ModelInterfaceStatus::Mismatch => {
                     if has_descriptor || has_descriptor_bytes {
                         return Err(mi_error(
@@ -1492,34 +1481,6 @@ fn decode_authorization(
                     ))
                 }
                 ModelInterfaceStatus::Resolved | ModelInterfaceStatus::NotModified => {
-                    if descriptor_schema != Some(MODEL_INTERFACE_DESCRIPTOR_SCHEMA)
-                        || semantic_digest.is_none()
-                    {
-                        return Err(mi_error(
-                            "negotiation_status_unexpected",
-                            "descriptor identity is required for this status",
-                        ));
-                    }
-                    if matches!(
-                        status(short_string(&reply["status"], "modelInterface.status")?)?,
-                        ModelInterfaceStatus::Resolved
-                    ) && (!has_descriptor || !has_descriptor_bytes)
-                    {
-                        return Err(mi_error(
-                            "negotiation_status_unexpected",
-                            "resolved reply requires descriptor and descriptorBytes",
-                        ));
-                    }
-                    if matches!(
-                        status(short_string(&reply["status"], "modelInterface.status")?)?,
-                        ModelInterfaceStatus::NotModified
-                    ) && (has_descriptor || has_descriptor_bytes)
-                    {
-                        return Err(mi_error(
-                            "negotiation_status_unexpected",
-                            "not_modified reply forbids descriptor payload",
-                        ));
-                    }
                     Err(mi_error(
                         "negotiation_status_unexpected",
                         "descriptor status is invalid for compiled verification",
@@ -1527,7 +1488,7 @@ fn decode_authorization(
                 }
             }
         }
-        RegistrationReply::ProtocolError(error) => Err(Error::ProtocolError(error)),
+        RegistrationReply::ProtocolError(error) => Err(LegacyError::ProtocolError(error).into()),
         RegistrationReply::Other(other) => Err(mi_error(
             "negotiation_status_unexpected",
             format!("expected registration result, got {other}"),
@@ -1535,7 +1496,7 @@ fn decode_authorization(
     }
 }
 
-fn dispose(binding: &mut LocalBinding) -> Result<(), Error> {
+fn dispose(binding: &mut LocalBinding) -> Result<(), NegotiatedError> {
     catch_unwind(AssertUnwindSafe(|| (binding.dispose)()))
         .map_err(|_| mi_error("adapter_dispose_failed", "binding disposal panicked"))?
         .map_err(|error| mi_error("adapter_dispose_failed", error.to_string()))
@@ -1546,7 +1507,7 @@ fn run_negotiated_open(
     config: ApalacheConfig,
     registration: ClientMessage,
     selection: &mut CompiledAdapterSelection<'_>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     let request = make_verify_request(&selection.metadata, selection.policy)?;
     if selection.state_computer_contract_version != STATE_COMPUTER_CONTRACT_VERSION {
         return Err(mi_error(
@@ -1565,7 +1526,7 @@ fn run_negotiated_open(
     transport.send(&encoded)?;
     let first = match transport.recv()? {
         Some(line) => line,
-        None => return Err(Error::TransportClosed),
+        None => return Err(LegacyError::TransportClosed.into()),
     };
     let authority = decode_authorization(&first, &request, selection.fallback_factory.is_some())?;
     let created = catch_unwind(AssertUnwindSafe(|| match authority {
@@ -1621,9 +1582,9 @@ fn run_negotiated(
     config: ApalacheConfig,
     registration: ClientMessage,
     selection: &mut CompiledAdapterSelection<'_>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     let primary = run_negotiated_open(&mut transport, config, registration, selection);
-    let close = transport.close().map(|_| ());
+    let close = transport.close().map(|_| ()).map_err(NegotiatedError::from);
     match (primary, close) {
         (Err(primary), _) => Err(primary),
         (Ok(()), Err(close)) => Err(close),
@@ -1636,7 +1597,7 @@ pub fn run_client_with_traces_negotiated(
     config: ApalacheConfig,
     trace_paths: Vec<String>,
     selection: &mut CompiledAdapterSelection<'_>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     run_client_with_traces_negotiated_transport(
         spawn_mirror(bin_path)?,
         config,
@@ -1650,7 +1611,7 @@ pub fn run_client_with_traces_negotiated_transport(
     config: ApalacheConfig,
     trace_paths: Vec<String>,
     selection: &mut CompiledAdapterSelection<'_>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     let registration = ClientMessage::RegisterTraces {
         apalache_config: config.clone(),
         itf_trace_paths: trace_paths,
@@ -1664,7 +1625,7 @@ pub fn run_client_negotiated(
     trace_config: TraceGenerationConfig,
     selection: &mut CompiledAdapterSelection<'_>,
     spec: Option<ApalacheSpec>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     run_client_negotiated_transport(
         spawn_mirror(bin_path)?,
         config,
@@ -1680,7 +1641,7 @@ pub fn run_client_negotiated_transport(
     trace_config: TraceGenerationConfig,
     selection: &mut CompiledAdapterSelection<'_>,
     spec: Option<ApalacheSpec>,
-) -> Result<(), Error> {
+) -> Result<(), NegotiatedError> {
     let registration = ClientMessage::Register {
         apalache_config: config.clone(),
         trace_config,

@@ -49,8 +49,6 @@ pub enum Error {
     ProtocolError(String),
     #[error("register failed: {0}")]
     RegisterFailed(String),
-    #[error("register failed ({code}): {message}")]
-    Registration { code: String, message: String },
     #[error("step mismatch on action \"{action}\": expected {}, got {}",
             prettify_json(.expected), prettify_json(.actual))]
     StepMismatch {
@@ -72,10 +70,33 @@ pub enum Error {
     Tls(String),
     #[error("registry: {0}")]
     Registry(String),
-    #[error("model interface ({code}): {message}")]
-    ModelInterface { code: String, message: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+/// Failures from compiled model-interface admission and negotiated replay.
+/// Legacy entry points retain their original exhaustive [`Error`] enum.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum NegotiatedError {
+    #[error(transparent)]
+    Legacy(#[from] Error),
+    #[error("register failed ({code}): {message}")]
+    Registration { code: String, message: String },
+    #[error("model interface ({code}): {message}")]
+    ModelInterface { code: String, message: String },
+}
+
+impl From<std::io::Error> for NegotiatedError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Legacy(Error::Io(error))
+    }
+}
+
+impl From<serde_json::Error> for NegotiatedError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Legacy(Error::Json(error))
+    }
 }
