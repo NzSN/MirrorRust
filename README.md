@@ -10,6 +10,22 @@ Rust client for the [Mirrors](https://github.com/NzSN/ModelMirrors) protocol —
 replay TLA+ traces against your state-machine implementation over stdio,
 plain TCP, or TLS 1.3 mutual TLS.
 
+## Tested version combination
+
+Use this locally validated source combination:
+
+| Repository | Source tag | Commit |
+| --- | --- | --- |
+| MirrorRust | [v0.0.1.0](https://github.com/NzSN/MirrorRust/tree/v0.0.1.0) | `a51149e6832d9fa2ead232c1f7157294a72557af` |
+| MirrorGate | [v0.0.3.1](https://github.com/NzSN/MirrorGate/tree/v0.0.3.1) | `9d88ead482f0e53285b1bacd2e29dd23b81440ac` |
+| Mirrors | [v0.0.3.1](https://github.com/NzSN/Mirrors/tree/v0.0.3.1) | `1a069cd3e34d7bfea272e3ee7e10f51acedcc7cb` |
+
+MirrorGate supplies the optional restricted-evaluation integration. Validation
+results and profile limits are recorded in the
+[client-guide conformance record](Plans/client-guide-conformance-fixes.md).
+These Git source tags identify the combination independently of package manifest
+and executable versions.
+
 ## Build & Test
 
 ```bash
