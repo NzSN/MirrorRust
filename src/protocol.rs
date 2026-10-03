@@ -390,10 +390,7 @@ fn walk(v: &Json) -> Result<Value, crate::Error> {
             items.iter().map(walk).collect::<Result<_, _>>()?,
         )),
         Json::Object(obj) => {
-            if let Some(raw) = obj.get("#bigint") {
-                let Json::String(raw) = raw else {
-                    return Err(invalid_value("#bigint must contain a decimal string"));
-                };
+            if let Some(Json::String(raw)) = obj.get("#bigint").filter(|_| obj.len() == 1) {
                 if raw.is_empty() {
                     return Ok(Value::Null);
                 }
@@ -402,26 +399,17 @@ fn walk(v: &Json) -> Result<Value, crate::Error> {
                     .map_err(|_| invalid_value(format!("malformed #bigint {raw:?}")))?;
                 return Ok(Value::Int(parsed));
             }
-            if let Some(raw) = obj.get("#tup") {
-                let Json::Array(items) = raw else {
-                    return Err(invalid_value("#tup must contain an array"));
-                };
+            if let Some(Json::Array(items)) = obj.get("#tup").filter(|_| obj.len() == 1) {
                 return Ok(Value::Tuple(
                     items.iter().map(walk).collect::<Result<_, _>>()?,
                 ));
             }
-            if let Some(raw) = obj.get("#set") {
-                let Json::Array(items) = raw else {
-                    return Err(invalid_value("#set must contain an array"));
-                };
+            if let Some(Json::Array(items)) = obj.get("#set").filter(|_| obj.len() == 1) {
                 return Ok(Value::Set(
                     items.iter().map(walk).collect::<Result<_, _>>()?,
                 ));
             }
-            if let Some(raw) = obj.get("#map") {
-                let Json::Array(entries) = raw else {
-                    return Err(invalid_value("#map must contain an array"));
-                };
+            if let Some(Json::Array(entries)) = obj.get("#map").filter(|_| obj.len() == 1) {
                 let mut pairs = Vec::with_capacity(entries.len());
                 for entry in entries {
                     let Json::Array(pair) = entry else {
@@ -434,10 +422,7 @@ fn walk(v: &Json) -> Result<Value, crate::Error> {
                 }
                 return Ok(Value::Map(pairs));
             }
-            if let Some(raw) = obj.get("#unserializable") {
-                let Json::String(raw) = raw else {
-                    return Err(invalid_value("#unserializable must contain a string"));
-                };
+            if let Some(Json::String(raw)) = obj.get("#unserializable").filter(|_| obj.len() == 1) {
                 return Ok(Value::Unserializable(raw.clone()));
             }
             if obj.len() == 2 && obj.contains_key("tag") && obj.contains_key("value") {

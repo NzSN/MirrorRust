@@ -687,3 +687,46 @@ fn decode_async_job_replies_preserves_kinds_phases_and_outcomes() {
         }
     );
 }
+
+
+fn decode_marker_field(raw: serde_json::Value) -> Result<Value, mirrorrust::Error> {
+    let message = decode_mirror_message(&json!({
+        "proto_step": "initial_state", "action": "Init", "state": { "field": raw }
+    }).to_string())?;
+    let MirrorMessage::InitialState { state, .. } = message else {
+        panic!("expected initial_state");
+    };
+    Ok(state["field"].clone())
+}
+
+#[test]
+fn itf_markers_require_exact_singleton_shapes() {
+    let seven = Value::Int(7.into());
+    let sequence = Value::Seq(vec![seven.clone()]);
+    let cases = vec![
+        ("#bigint", json!("7"), Value::Str("7".into()), seven.clone()),
+        ("#set", json!([{ "#bigint": "7" }]), sequence.clone(), Value::Set(vec![seven.clone()])),
+        ("#tup", json!([{ "#bigint": "7" }]), sequence, Value::Tuple(vec![seven.clone()])),
+        ("#map", json!([["key", { "#bigint": "7" }]]),
+            Value::Seq(vec![Value::Seq(vec![Value::Str("key".into()), seven.clone()])]),
+            Value::Map(vec![(Value::Str("key".into()), seven)])),
+        ("#unserializable", json!("opaque"), Value::Str("opaque".into()), Value::Unserializable("opaque".into())),
+    ];
+    for (marker, raw, field, wrapped) in cases {
+        assert_eq!(decode_marker_field(json!({marker: raw.clone(), "ordinary": true})).unwrap(),
+            Value::Record(st(vec![(marker, field), ("ordinary", Value::Bool(true))])), "{marker}");
+        assert_eq!(decode_marker_field(json!({marker: raw})).unwrap(), wrapped, "{marker}");
+        assert_eq!(decode_marker_field(json!({marker: true})).unwrap(),
+            Value::Record(st(vec![(marker, Value::Bool(true))])), "{marker}");
+    }
+}
+
+#[test]
+fn itf_variants_require_exact_tag_value_shape() {
+    assert_eq!(decode_marker_field(json!({"tag":"Some", "value":{"#bigint":"7"}})).unwrap(),
+        Value::Variant("Some".into(), Box::new(Value::Int(7.into()))));
+    assert_eq!(decode_marker_field(json!({"tag":"Some", "value":{"#bigint":"7"}, "ordinary":true})).unwrap(),
+        Value::Record(st(vec![("tag", Value::Str("Some".into())), ("value", Value::Int(7.into())), ("ordinary", Value::Bool(true))])));
+    assert!(decode_marker_field(json!({"tag":7, "value":null})).is_err());
+    assert!(decode_marker_field(json!({"#bigint":"not-an-integer"})).is_err());
+}
