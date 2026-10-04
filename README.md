@@ -218,3 +218,9 @@ Compiled verify mode accepts only an exact `matched` admission. Explicit `prefer
 may use its separate fallback factory for an old-server omission or a valid
 `unsupported`/`unavailable` reply. Descriptor-only statuses, including `too_large`,
 are protocol failures for this request mode and never authorize fallback.
+
+## Deterministic scheduling
+
+Experimental cooperative scheduling, generated replay integration and finite
+exploration are documented in [deterministic scheduling](docs/deterministic-scheduling.md).
+Concrete acceptance remains tied to the selected artifacts and application profile.

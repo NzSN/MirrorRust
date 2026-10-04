@@ -3,6 +3,9 @@ mod json;
 pub mod model_interface;
 pub mod protocol;
 pub mod registry;
+pub mod schedule;
+pub mod schedule_binding;
+pub mod schedule_exploration;
 pub mod spec;
 pub mod transport;
 
@@ -100,3 +103,6 @@ impl From<serde_json::Error> for NegotiatedError {
         Self::Legacy(Error::Json(error))
     }
 }
+
+/// Experimental declaration; qualification is recorded per concrete artifact.
+pub const SCHEDULING_CAPABILITIES: &str = include_str!("../scheduling-capabilities.json");

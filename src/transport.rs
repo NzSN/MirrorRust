@@ -70,6 +70,8 @@ enum TransportInner {
     Tls(Box<BufReader<TlsStream>>),
 }
 
+type ReceivedObserver = Box<dyn FnMut(&str) + Send>;
+
 /// A single Mirrors protocol session over stdio, TCP, or TLS 1.3 mTLS.
 pub struct Transport {
     inner: TransportInner,
@@ -77,6 +79,7 @@ pub struct Transport {
     close_code: Option<i32>,
     peer_fingerprint: Option<String>,
     async_capable: bool,
+    received_observer: Option<ReceivedObserver>,
 }
 
 pub fn spawn_mirror(bin_path: &str) -> Result<Transport, Error> {
@@ -103,6 +106,7 @@ pub fn spawn_mirror(bin_path: &str) -> Result<Transport, Error> {
         close_code: None,
         peer_fingerprint: None,
         async_capable: false,
+        received_observer: None,
     })
 }
 
@@ -116,6 +120,7 @@ pub fn connect_mirror(host: &str, port: u16) -> Result<Transport, Error> {
         close_code: None,
         peer_fingerprint: None,
         async_capable: true,
+        received_observer: None,
     })
 }
 
@@ -189,10 +194,15 @@ pub fn connect_tls_mirror(host: &str, port: u16, options: &TlsOptions) -> Result
         close_code: None,
         peer_fingerprint: Some(fingerprint),
         async_capable: true,
+        received_observer: None,
     })
 }
 
 impl Transport {
+    pub(crate) fn observe_received(&mut self, observer: impl FnMut(&str) + Send + 'static) {
+        self.received_observer = Some(Box::new(observer));
+    }
+
     /// Write a single newline-terminated line and flush.
     pub fn send(&mut self, line: &str) -> Result<(), Error> {
         validate_protocol_line(line)?;
@@ -214,11 +224,17 @@ impl Transport {
         if self.closed {
             return Err(Error::TransportClosed);
         }
-        match &mut self.inner {
+        let result = match &mut self.inner {
             TransportInner::Stdio { reader, .. } => read_protocol_line(reader),
             TransportInner::Tcp(reader) => read_protocol_line(reader),
             TransportInner::Tls(reader) => read_protocol_line(reader),
+        };
+        if let Ok(Some(line)) = &result {
+            if let Some(observer) = self.received_observer.as_mut() {
+                observer(line);
+            }
         }
+        result
     }
 
     /// Close the transport. Network transports return zero; stdio returns the
