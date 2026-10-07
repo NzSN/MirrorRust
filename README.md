@@ -4,15 +4,24 @@ For repository ownership and language support, read the
 [framework map](../Mirrors/Docs/framework-map.md). Restricted evaluation uses the
 [Gate Rust SDK](../MirrorGate/sdk/rust/README.md) and
 [optional integration](../MirrorGate/integrations/mirrorrust/README.md). Its
-handwritten Counter fixture does not establish a generated Rust target.
+handwritten Counter fixture does not establish a generic generated Rust Gate
+evaluator. Mirrors emits `mirrorrust-v1/v2`; ordinary negotiated Rust replay and
+Gate fixture/evaluator scope are separate.
 
 Rust client for the [Mirrors](https://github.com/NzSN/ModelMirrors) protocol —
 replay TLA+ traces against your state-machine implementation over stdio,
 plain TCP, or TLS 1.3 mutual TLS.
 
-## Tested version combination
+[Rust-thread scheduling](docs/deterministic-scheduling.md) implements accepted
+DPM-0–DPM-5 for the declared checkpoint profile; actual hooks and observations
+remain application-owned. [Language acceptance](../Mirrors/Plans/dpm-languages-evidence-20261005/README.md)
+retains its exact installed/native pilot results. [Current framework status](../Mirrors/Docs/current-status.md)
+separates those results from the October 7 M5 compatibility pin and broader M4.
 
-Use this locally validated source combination:
+## Historical tested version combination
+
+The following October 1 source-tag combination is retained as historical local
+acceptance. It is not the latest source inventory or a new package-release pin:
 
 | Repository | Source tag | Commit |
 | --- | --- | --- |
@@ -195,8 +204,8 @@ connection while retaining the primary error. A registration rejection such as
 queue pressure leaves a valid connection usable. Mutable transport borrowing
 serializes exchanges; backend jobs submitted before awaiting can run concurrently.
 Compiled model-interface negotiation uses compiler-produced metadata and exact
-local adapter registrations. Mirrors implements the `mirrorrust-v1` generated
-binding target; the Counter target in MirrorGate is a separate fixture-only
+local adapter registrations. Mirrors implements `mirrorrust-v1` and explicit typed-map `mirrorrust-v2` generated
+binding targets; the Counter target in MirrorGate is a separate fixture-only
 `mirrorrust-counter-fixture-v1` acceptance binding. The optional Gate facade
 lives in `../MirrorGate/integrations/mirrorrust` and is not a MirrorRust runtime
 dependency.

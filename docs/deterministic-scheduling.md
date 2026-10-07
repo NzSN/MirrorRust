@@ -1,5 +1,12 @@
 # Deterministic scheduling (experimental)
 
+DPM-0–DPM-5 are accepted for this declared profile; source-hidden crate consumers,
+generated replay, finite exploration and the frozen four-case native pilot pass.
+[Exact language acceptance](../../Mirrors/Plans/dpm-languages-evidence-20261005/README.md)
+is separate from [framework qualification](../../Mirrors/Docs/current-status.md),
+full WriteSentry and new OS/Gate backend claims. The ordinary crate declaration
+remains experimental and does not itself establish runtime acceptance.
+
 The `schedule` module implements `mirrorrust.cooperative-checkpoints/v1` using
 owned Rust OS threads. It grants one participating actor an interval ending at a
 declared checkpoint. It does not provide an async executor, arbitrary instruction
