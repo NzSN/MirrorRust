@@ -18,6 +18,11 @@ remain application-owned. [Language acceptance](../Mirrors/Plans/dpm-languages-e
 retains its exact installed/native pilot results. [Current framework status](../Mirrors/Docs/current-status.md)
 separates those results from the October 7 M5 compatibility pin and broader M4.
 
+The newer [generated DPM kit and receipt timeline](../Mirrors/Docs/dpm-usability-design.md)
+have source acceptance only. They prepare explicit mapping helpers and render
+actual receipts; application hooks/observations and the frozen installed/native
+acceptance remain separate. F3–F5 are approved follow-ons.
+
 ## Historical tested version combination
 
 The following October 1 source-tag combination is retained as historical local
