@@ -1,5 +1,7 @@
 # MirrorRust
 
+[Product versions and compatibility](docs/versioning.md).
+
 For repository ownership and language support, read the
 [framework map](../Mirrors/Docs/framework-map.md). Restricted evaluation uses the
 [Gate Rust SDK](../MirrorGate/sdk/rust/README.md) and
